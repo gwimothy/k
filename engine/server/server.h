@@ -24,6 +24,10 @@ public:
     uint32_t tickCount() const { return tickCount_; }
     const std::string& mapName() const { return mapName_; }
     const proto::PlayerState& player() const { return player_; }
+    void setPlayerOrigin(const Vec3& origin) {
+        player_.origin = origin;
+        player_.velocity = Vec3(0);
+    }
 
 private:
     void readMessages();

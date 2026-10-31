@@ -36,9 +36,22 @@ Libraries in the build:
 | Target | Contents | Depends on |
 |---|---|---|
 | `k_core` | `core/`, `shared/` movement, header-only `net/` | glm |
-| `k_engine` | platform, render, client, server, ui, host | k_core, SDL3, glad, imgui |
+| `k_assets` | KeyValues, mesh building, glTF parsing (no GPU) | k_core, cgltf |
+| `k_engine` | platform, render, client, server, ui, host | k_assets, SDL3, glad, imgui, stb |
 | `k` | launcher executable | k_engine |
-| `k_tests` | unit tests | k_core only (no window or GPU needed) |
+| `k_tests` | unit tests | k_assets (no window or GPU needed) |
+
+## Rendering
+
+```
+scene → HDR target (RGBA16F, MSAA) → resolve → postprocess (exposure, ACES, gamma) → window → ImGui
+```
+
+- Materials (`base/materials/*.kmt`) choose a shader (`LitGeneric`, `UnlitGeneric`) and set its
+  parameters. Meshes keep one draw range per material.
+- Textures are sRGB and lighting happens in linear space. Opaque geometry draws first, then the
+  sky at the far plane, then translucent geometry, then debug lines.
+- Shaders live in `base/shaders/` and recompile when their files change.
 
 ## Main loop
 

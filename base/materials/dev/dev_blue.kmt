@@ -1,0 +1,5 @@
+"LitGeneric"
+{
+    "$basetexture" "dev/dev_blue"
+    "$surfaceprop" "concrete"
+}

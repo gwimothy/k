@@ -18,6 +18,8 @@ ConVar cl_forwardspeed("cl_forwardspeed", "450", FCVAR_ARCHIVE | FCVAR_CHEAT, "F
 ConVar cl_sidespeed("cl_sidespeed", "450", FCVAR_ARCHIVE | FCVAR_CHEAT, "Strafe speed.");
 ConVar cl_upspeed("cl_upspeed", "320", FCVAR_ARCHIVE | FCVAR_CHEAT, "Up/down speed (noclip, swimming).");
 ConVar fov_desired("fov_desired", "90", FCVAR_ARCHIVE, "Field of view (horizontal degrees at 4:3).", 75.0f, 110.0f);
+ConVar cl_yawspeed("cl_yawspeed", "210", FCVAR_NONE, "Keyboard turn speed (+left/+right), degrees/sec.");
+ConVar cl_pitchspeed("cl_pitchspeed", "225", FCVAR_NONE, "Keyboard look speed (+lookup/+lookdown), degrees/sec.");
 ConVar cl_interpolate("cl_interpolate", "1", FCVAR_NONE, "Smooth movement between server ticks.");
 
 // ---- Buttons ----------------------------------------------------------------------
@@ -25,6 +27,7 @@ ConVar cl_interpolate("cl_interpolate", "1", FCVAR_NONE, "Smooth movement betwee
 struct Buttons {
     KButton forward, back, moveleft, moveright, moveup, movedown;
     KButton jump, duck, speed, walk, attack, attack2, use, reload;
+    KButton left, right, lookup, lookdown;
 };
 
 Buttons& buttons() {
@@ -54,6 +57,10 @@ ButtonCommands bc_attack("attack", &Buttons::attack);
 ButtonCommands bc_attack2("attack2", &Buttons::attack2);
 ButtonCommands bc_use("use", &Buttons::use);
 ButtonCommands bc_reload("reload", &Buttons::reload);
+ButtonCommands bc_left("left", &Buttons::left);
+ButtonCommands bc_right("right", &Buttons::right);
+ButtonCommands bc_lookup("lookup", &Buttons::lookup);
+ButtonCommands bc_lookdown("lookdown", &Buttons::lookdown);
 
 } // namespace
 
@@ -73,6 +80,13 @@ void Client::disconnect() {
     snapshots_ = 0;
     commandNumber_ = 0;
     previous_ = current_ = {};
+}
+
+void Client::frameKeyboardLook(float dt) {
+    auto& b = buttons();
+    viewAngles_.yaw = normalizeAngle(viewAngles_.yaw + cl_yawspeed.getFloat() * dt * (b.left.state() - b.right.state()));
+    viewAngles_.pitch = std::clamp(viewAngles_.pitch + cl_pitchspeed.getFloat() * dt * (b.lookdown.state() - b.lookup.state()),
+                                   -cl_pitchup.getFloat(), cl_pitchdown.getFloat());
 }
 
 void Client::frameMouse(float dx, float dy) {

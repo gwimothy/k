@@ -41,6 +41,10 @@ public:
     void screenshot();
     void writeConfig();
     void reloadShaders();
+    void reloadMaterials();
+    void setPos(const Vec3& origin);
+    void setAng(const QAngle& angles);
+    void printPos();
 
     static Host* instance() { return instance_; }
 

@@ -1,0 +1,5 @@
+"LitGeneric"
+{
+    "$basetexture" "models/props/crate"
+    "$surfaceprop" "wood"
+}

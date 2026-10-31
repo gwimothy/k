@@ -16,10 +16,18 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <iostream>
 #include <mutex>
 #include <thread>
 
@@ -60,28 +68,75 @@ ConCommand cmd_toggleconsole("toggleconsole", [](const CmdArgs&) { if (host()) h
 ConCommand cmd_screenshot("screenshot", [](const CmdArgs&) { if (host()) host()->screenshot(); }, "Save a PNG screenshot to screenshots/.");
 ConCommand cmd_writeconfig("host_writeconfig", [](const CmdArgs&) { if (host()) host()->writeConfig(); }, "Save binds and archived cvars to cfg/config.cfg.");
 ConCommand cmd_reloadshaders("r_reloadshaders", [](const CmdArgs&) { if (host()) host()->reloadShaders(); }, "Recompile shaders from disk.");
+ConCommand cmd_reloadmaterials("mat_reloadall", [](const CmdArgs&) { if (host()) host()->reloadMaterials(); }, "Reload all textures and materials from disk.");
+ConCommand cmd_setpos(
+    "setpos",
+    [](const CmdArgs& a) {
+        if (a.argc() < 4) {
+            log::info("Usage: setpos x y z");
+            return;
+        }
+        if (host()) host()->setPos({std::stof(a.arg(1)), std::stof(a.arg(2)), std::stof(a.arg(3))});
+    },
+    "Move the player to a position (feet).", FCVAR_CHEAT);
+ConCommand cmd_setang(
+    "setang",
+    [](const CmdArgs& a) {
+        if (a.argc() < 3) {
+            log::info("Usage: setang pitch yaw [roll]");
+            return;
+        }
+        if (host()) host()->setAng({std::stof(a.arg(1)), std::stof(a.arg(2)), a.argc() > 3 ? std::stof(a.arg(3)) : 0.0f});
+    },
+    "Set the view angles.", FCVAR_CHEAT);
+ConCommand cmd_getpos(
+    "getpos",
+    [](const CmdArgs&) {
+        if (host()) host()->printPos();
+    },
+    "Print setpos/setang commands for the current position.");
+ConVar crosshair("crosshair", "1", FCVAR_ARCHIVE, "Draw a crosshair.");
 
-// Reads lines from stdin on a background thread (dedicated server console).
+// Non-blocking stdin for the dedicated server console. Deliberately avoids C stdio /
+// iostreams: a thread blocked in std::getline holds the stdin lock, and glibc then
+// deadlocks flushing streams at exit.
 class StdinReader {
 public:
     void start() {
+#ifdef _WIN32
         std::thread([this] {
-            std::string line;
-            while (std::getline(std::cin, line)) {
+            HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+            char buf[512];
+            DWORD n = 0;
+            while (ReadFile(in, buf, sizeof(buf), &n, nullptr) && n > 0) {
                 std::lock_guard lock(mutex_);
-                lines_.push_back(line);
+                pending_.append(buf, n);
             }
         }).detach();
+#endif
     }
+
     void flushInto() {
+#ifndef _WIN32
+        pollfd pfd{0, POLLIN, 0};
+        while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN)) {
+            char buf[512];
+            ssize_t n = read(0, buf, sizeof(buf));
+            if (n <= 0) break;
+            pending_.append(buf, static_cast<size_t>(n));
+        }
+#endif
         std::lock_guard lock(mutex_);
-        for (auto& l : lines_) cmd::append(l);
-        lines_.clear();
+        size_t nl;
+        while ((nl = pending_.find('\n')) != std::string::npos) {
+            cmd::append(pending_.substr(0, nl));
+            pending_.erase(0, nl + 1);
+        }
     }
 
 private:
     std::mutex mutex_;
-    std::vector<std::string> lines_;
+    std::string pending_;
 };
 
 StdinReader& stdinReader() {
@@ -256,6 +311,7 @@ void Host::frame(double frameTime) {
 
     if (window_) {
         client_.frameMouse(mouseDx_, mouseDy_);
+        client_.frameKeyboardLook(static_cast<float>(frameTime));
         mouseDx_ = mouseDy_ = 0;
         renderFrame(alpha);
     }
@@ -355,8 +411,17 @@ void Host::renderFrame(float alpha) {
 }
 
 void Host::drawOverlay() {
-    if (!cl_showfps.getBool() && !cl_showpos.getBool()) return;
     ImGuiIO& io = ImGui::GetIO();
+    if (crosshair.getBool() && client_.active() && !(console_ && console_->open())) {
+        auto* dl = ImGui::GetBackgroundDrawList();
+        ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+        const ImU32 col = IM_COL32(255, 220, 80, 230);
+        dl->AddLine(ImVec2(c.x - 8, c.y), ImVec2(c.x - 3, c.y), col, 2.0f);
+        dl->AddLine(ImVec2(c.x + 3, c.y), ImVec2(c.x + 8, c.y), col, 2.0f);
+        dl->AddLine(ImVec2(c.x, c.y - 8), ImVec2(c.x, c.y - 3), col, 2.0f);
+        dl->AddLine(ImVec2(c.x, c.y + 3), ImVec2(c.x, c.y + 8), col, 2.0f);
+    }
+    if (!cl_showfps.getBool() && !cl_showpos.getBool()) return;
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 10, 10), ImGuiCond_Always, ImVec2(1, 0));
     ImGui::SetNextWindowBgAlpha(0.35f);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -367,6 +432,8 @@ void Host::drawOverlay() {
             ImGui::Text("%.0f fps (%.2f ms)", fps_, fps_ > 0 ? 1000.0f / fps_ : 0.0f);
             const auto& s = renderer_->stats();
             ImGui::Text("%zu draws, %zu tris", s.drawCalls, s.triangles);
+            ImGui::Text("%zu textures, %zu materials, %zu models", renderer_->textures().count(),
+                        renderer_->materials().count(), renderer_->models().count());
         }
         if (cl_showpos.getBool()) {
             const auto& p = client_.latestState();
@@ -413,6 +480,23 @@ void Host::screenshot() {
 
 void Host::reloadShaders() {
     if (renderer_ && renderer_->reloadShaders()) log::info("Shaders reloaded");
+}
+
+void Host::setPos(const Vec3& origin) {
+    if (server_.active()) server_.setPlayerOrigin(origin);
+}
+
+void Host::setAng(const QAngle& angles) { client_.setViewAngles(angles); }
+
+void Host::printPos() {
+    const auto& p = server_.player();
+    const auto& a = client_.viewAngles();
+    log::info("setpos {:.2f} {:.2f} {:.2f}; setang {:.2f} {:.2f} {:.2f}", p.origin.x, p.origin.y, p.origin.z, a.pitch,
+              a.yaw, a.roll);
+}
+
+void Host::reloadMaterials() {
+    if (renderer_) renderer_->reloadMaterials();
 }
 
 void Host::writeConfig() {

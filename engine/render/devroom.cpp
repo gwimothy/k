@@ -6,37 +6,46 @@ namespace k {
 
 MeshData buildDevRoom() {
     MeshData m;
-    const Vec3 floorC{0.42f, 0.42f, 0.44f};
-    const Vec3 wallC{0.70f, 0.70f, 0.68f};
-    const Vec3 ceilC{0.55f, 0.55f, 0.58f};
-    const Vec3 orange{0.90f, 0.52f, 0.18f};
-    const Vec3 blue{0.25f, 0.45f, 0.80f};
-    const Vec3 green{0.35f, 0.65f, 0.35f};
+    // Main hall: 2048 x 2048, open to the sky (no ceiling) so the skybox shows.
+    const Vec3 lo{-1024, -1024, 0}, hi{1024, 1024, 384};
+    m.addQuad({lo.x, lo.y, 0}, {hi.x, lo.y, 0}, {hi.x, hi.y, 0}, {lo.x, hi.y, 0}, "dev/dev_floor");
+    m.addQuad({hi.x, lo.y, 0}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {hi.x, hi.y, 0}, "dev/dev_wall");
+    m.addQuad({lo.x, lo.y, 0}, {lo.x, hi.y, 0}, {lo.x, hi.y, hi.z}, {lo.x, lo.y, hi.z}, "dev/dev_wall");
+    m.addQuad({lo.x, hi.y, 0}, {hi.x, hi.y, 0}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z}, "dev/dev_wall");
+    m.addQuad({lo.x, lo.y, 0}, {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, lo.y, 0}, "dev/dev_wall");
 
-    // Main hall: 2048 x 2048, 384 tall.
-    m.addRoom({-1024, -1024, 0}, {1024, 1024, 384}, floorC, wallC, ceilC);
+    // Block of 64-unit cubes (a standard Source crate size).
+    m.addBox({256, -64, 0}, {320, 0, 64}, "dev/dev_orange");
+    m.addBox({256, 0, 0}, {320, 64, 64}, "dev/dev_orange");
+    m.addBox({256, -32, 64}, {320, 32, 128}, "dev/dev_orange");
 
-    // Crates (64 units = a standard Source crate).
-    m.addBox({256, -64, 0}, {320, 0, 64}, orange);
-    m.addBox({256, 0, 0}, {320, 64, 64}, orange);
-    m.addBox({256, -32, 64}, {320, 32, 128}, orange);
-
-    // Stairs: 8 steps of 16 units high (max step height in Source is 18).
+    // Stairs: 8 steps of 16 units high (Source's max step height is 18).
     for (int i = 0; i < 8; ++i) {
         float x0 = -512.0f + static_cast<float>(i) * 24.0f;
-        m.addBox({x0, 256, 0}, {x0 + 24, 448, 16.0f * static_cast<float>(i + 1)}, blue);
+        m.addBox({x0, 256, 0}, {x0 + 24, 448, 16.0f * static_cast<float>(i + 1)}, "dev/dev_blue");
     }
-    m.addBox({-320, 256, 0}, {-128, 448, 128}, blue); // landing
+    m.addBox({-320, 256, 0}, {-128, 448, 128}, "dev/dev_blue");
 
     // Ramp (~27 degrees) leading to a platform.
-    m.addRampX({-512, -448, 0}, {-256, -256, 128}, green);
-    m.addBox({-256, -448, 0}, {-64, -256, 128}, green);
+    m.addRampX({-512, -448, 0}, {-256, -256, 128}, "dev/dev_green");
+    m.addBox({-256, -448, 0}, {-64, -256, 128}, "dev/dev_green");
 
     // Pillars for scale.
     for (float x : {-640.0f, 640.0f})
-        for (float y : {-640.0f, 640.0f}) m.addBox({x - 32, y - 32, 0}, {x + 32, y + 32, 384}, wallC);
+        for (float y : {-640.0f, 640.0f}) m.addBox({x - 32, y - 32, 0}, {x + 32, y + 32, 384}, "dev/dev_wall");
 
+    // A missing material on purpose, so the error texture is visible somewhere.
+    m.addBox({600, 300, 0}, {632, 332, 32}, "dev/this_material_does_not_exist");
     return m;
+}
+
+std::vector<std::pair<std::string, Vec3>> devRoomProps() {
+    return {
+        {"models/props/crate.glb", {160, -160, 0}},
+        {"models/props/crate.glb", {200, -160, 0}},
+        {"models/props/crate.glb", {180, -160, 32}},
+        {"models/props/crate.glb", {160, 160, 0}},
+    };
 }
 
 } // namespace k

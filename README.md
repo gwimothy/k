@@ -4,15 +4,16 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phase 1 (Foundation) done.** You can fly around a test room with noclip, use the
-> developer console, bind keys and save config. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: **Phases 1-2 done** (foundation, rendering basics). Fly around a textured test room
+> with glTF props and a skybox, use the developer console, bind keys, hot-reload shaders and
+> materials. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
 
 ## Building
 
 Needs CMake 3.24+, a C++20 compiler (GCC 13+, Clang 16+, MSVC 2022) and OpenGL 4.5.
-Dependencies (SDL3, glm, Dear ImGui, doctest) are downloaded automatically.
+Dependencies (SDL3, glm, Dear ImGui, stb_image, cgltf, doctest) are downloaded automatically.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -48,7 +49,8 @@ Command-line options work like Source:
 ```
 
 Handy console commands: `cvarlist`, `find <text>`, `help <name>`, `bind <key> <cmd>`,
-`alias`, `exec <cfg>`, `toggle <cvar>`, `screenshot`, `r_reloadshaders`, `quit`.
+`alias`, `exec <cfg>`, `toggle <cvar>`, `screenshot`, `getpos`, `mat_reloadall`, `quit`.
+With `sv_cheats 1`: `setpos`, `setang`, `mat_wireframe 1`, `r_showbounds 1`, `r_drawaxis 1`.
 
 Your settings are written to `base/cfg/config.cfg` on exit. Put your own startup commands
 in `base/cfg/autoexec.cfg`.
@@ -73,11 +75,12 @@ engine/
   server/    authoritative game simulation
   client/    input -> UserCmds, key bindings, snapshot interpolation
   platform/  SDL3 window and key names
-  render/    OpenGL 4.5 renderer
+  render/    OpenGL 4.5 renderer: textures, materials, glTF models, sky, debug draw
   ui/        developer console (Dear ImGui)
   host/      main loop, startup, config
 launcher/    executable entry point
-base/        game content: cfg/, shaders/ (copied next to the binary on build)
+base/        game content: cfg/, shaders/, materials/, models/ (copied next to the binary)
+tools/       asset generators and (later) map compilers
 tests/       unit tests (doctest)
 docs/        roadmap and architecture
 ```

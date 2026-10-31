@@ -30,7 +30,17 @@ FetchContent_Declare(doctest
   GIT_SHALLOW TRUE
   SOURCE_SUBDIR _none)
 
-FetchContent_MakeAvailable(SDL3 glm imgui doctest)
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+  SOURCE_SUBDIR _none)
+FetchContent_Declare(cgltf
+  GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+  GIT_TAG v1.15
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _none)
+
+FetchContent_MakeAvailable(SDL3 glm imgui doctest stb cgltf)
 
 add_library(glm_headers INTERFACE)
 target_include_directories(glm_headers SYSTEM INTERFACE ${glm_SOURCE_DIR})
@@ -49,3 +59,10 @@ target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
 
 add_library(doctest_headers INTERFACE)
 target_include_directories(doctest_headers SYSTEM INTERFACE ${doctest_SOURCE_DIR})
+
+# stb_image + cgltf are single-header libraries; engine/render/third_party_impl.cpp
+# holds their implementations.
+add_library(stb_headers INTERFACE)
+target_include_directories(stb_headers SYSTEM INTERFACE ${stb_SOURCE_DIR})
+add_library(cgltf_headers INTERFACE)
+target_include_directories(cgltf_headers SYSTEM INTERFACE ${cgltf_SOURCE_DIR})

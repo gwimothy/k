@@ -27,6 +27,8 @@ public:
 
     // Per rendered frame: apply mouse movement to the view angles.
     void frameMouse(float dx, float dy);
+    // Per rendered frame: apply +left/+right/+lookup/+lookdown.
+    void frameKeyboardLook(float dt);
 
     // Per server tick: build a UserCmd from current input and send it.
     void createMove(float tickInterval);
@@ -38,6 +40,8 @@ public:
     ViewSetup view(float alpha) const;
 
     const proto::PlayerState& latestState() const { return current_; }
+    void setViewAngles(const QAngle& a) { viewAngles_ = a; }
+    const QAngle& viewAngles() const { return viewAngles_; }
     const std::string& mapName() const { return mapName_; }
     uint32_t serverTick() const { return serverTick_; }
 
