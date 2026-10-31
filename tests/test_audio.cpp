@@ -55,24 +55,25 @@ TEST_CASE("audio: the game emits footsteps, jumps and door sounds") {
     };
     game::GameWorld world(services);
     world.levelInit("test", std::make_shared<const bsp::BspData>(k::test::testRoom()));
-    world.setPlayerOrigin({0, -150, 0});
+    world.clientConnect(0, "tester");
+    world.setPlayerOrigin(0, {0, -150, 0});
     UserCmd walk;
     walk.forwardMove = 450;
     for (int i = 0; i < 66; ++i) {
-        world.runCommand(walk, 1.0f / 66);
-        world.frame(1.0f / 66);
+        world.runCommand(0, walk, 1.0f / 66);
+        world.frame(1.0f / 66, 0);
     }
     auto count = [&](const std::string& n) { return std::count(sounds.begin(), sounds.end(), n); };
     CHECK(count("Player.Footstep") >= 2);
     UserCmd jump;
     jump.buttons = IN_JUMP;
     for (int i = 0; i < 70; ++i) {
-        world.runCommand(jump, 1.0f / 66);
-        world.frame(1.0f / 66);
+        world.runCommand(0, jump, 1.0f / 66);
+        world.frame(1.0f / 66, 0);
     }
     CHECK(count("Player.Jump") == 1);
     world.deliverInput("door1", "Open", "", nullptr, nullptr);
-    for (int i = 0; i < 66; ++i) world.frame(1.0f / 66);
+    for (int i = 0; i < 66; ++i) world.frame(1.0f / 66, 0);
     CHECK(count("Door.Move") == 1);
     CHECK(count("stop:Door.Move") == 1);
     CHECK(count("Door.Stop") == 1);

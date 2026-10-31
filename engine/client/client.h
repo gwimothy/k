@@ -1,14 +1,24 @@
 #pragma once
-// The game client: turns input into UserCmds, sends them to the server, receives snapshots,
-// and produces the view to render.
+// The game client: input -> UserCmds -> server; snapshots -> prediction + interpolation.
+//
+// * Local player: predicted. Every unacknowledged command is re-run on top of the latest
+//   server state with the same movement code the server uses, so movement responds
+//   instantly even with latency. Mispredictions are smoothed out over a few frames.
+// * Everything else: interpolated cl_interp seconds in the past between snapshots, so it
+//   moves smoothly even when packets are late or lost.
 
 #include "net/channel.h"
+#include "net/socket.h"
+#include "net/udp_channel.h"
+#include "shared/bspfile.h"
 #include "shared/protocol.h"
 #include "shared/usercmd.h"
 
+#include <array>
 #include <cstdint>
-#include <map>
+#include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,63 +48,110 @@ struct ViewSetup {
 
 class Client {
 public:
-    void connect(std::unique_ptr<net::NetChannel> channel, std::string playerName);
-    void disconnect();
-    bool connected() const { return channel_ != nullptr; }
-    bool active() const { return gotServerInfo_ && snapshots_ > 0; }
+    enum class State { Disconnected, Connecting, Connected, Active };
 
-    // Per rendered frame: apply mouse movement to the view angles.
+    void connectLocal(std::unique_ptr<net::NetChannel> channel, std::string playerName);
+    bool connectRemote(const net::Address& server, std::string playerName, const std::string& password = {});
+    void disconnect(const std::string& reason = {});
+    State state() const { return state_; }
+    bool connected() const { return state_ == State::Connected || state_ == State::Active; }
+    bool active() const { return state_ == State::Active; }
+    bool remote() const { return remote_; }
+
+    // The map the server told us to load (set once per connection). The host loads it and
+    // hands the BSP back with setMap().
+    std::optional<std::string> takeMapToLoad();
+    void setMap(std::shared_ptr<const bsp::BspData> map) { map_ = std::move(map); }
+
+    // Per rendered frame: mouse/keyboard look.
     void frameMouse(float dx, float dy);
-    // Per rendered frame: apply +left/+right/+lookup/+lookdown.
     void frameKeyboardLook(float dt);
 
-    // Per server tick: build a UserCmd from current input and send it.
-    void createMove(float tickInterval);
-
+    // Per rendered frame: advance the client clock and fade prediction errors.
+    void advance(float frameTime);
+    // Per client tick (the server's tick rate): build and send a UserCmd, run prediction.
+    void tick(double now, float frameTime);
+    // Network input; call every frame.
+    void readPackets(double now);
     // Send a command string for the server to run (e.g. "noclip").
     void sendStringCmd(const std::string& text);
 
-    // Drain messages from the server.
-    void readPackets();
-
-    // View for rendering. `alpha` in [0,1] is how far we are between the last two snapshots.
+    // View for rendering. `alpha` in [0,1]: how far between the last two client ticks.
     ViewSetup view(float alpha) const;
+    // Visible networked entities, interpolated.
+    void renderEntities(std::vector<RenderEntity>& out) const;
 
-    const proto::PlayerState& latestState() const { return current_; }
-    // Visible networked entities, interpolated like the view.
-    void renderEntities(float alpha, std::vector<RenderEntity>& out) const;
-    // Latest on-screen message and when it arrived (seconds, client time).
-    const std::string& centerMessage() const { return centerMessage_; }
-    double centerMessageTime() const { return centerMessageTime_; }
-    // Sounds received since the last call.
-    std::vector<SoundEvent> takeSounds() { return std::move(sounds_); }
+    const proto::PlayerState& latestState() const { return predicted_; }
+    const std::string& mapName() const { return mapName_; }
+    uint32_t serverTick() const { return latestTick_; }
     void setViewAngles(const QAngle& a) { viewAngles_ = a; }
     const QAngle& viewAngles() const { return viewAngles_; }
-    const std::string& mapName() const { return mapName_; }
-    uint32_t serverTick() const { return serverTick_; }
+    float tickInterval() const { return serverTickInterval_; }
+
+    const std::string& centerMessage() const { return centerMessage_; }
+    double centerMessageTime() const { return centerMessageTime_; }
+    std::vector<SoundEvent> takeSounds() { return std::move(sounds_); }
+    const std::string& disconnectReason() const { return disconnectReason_; }
+
+    struct NetGraph {
+        net::NetStats net;
+        float predictionError = 0; // units, last correction
+        int snapshotsPerSec = 0;
+        float interpMs = 0;
+    };
+    NetGraph netGraph() const;
 
 private:
+    struct Snapshot {
+        uint32_t tick = 0;
+        proto::PlayerState player;
+        uint32_t lastCommand = 0;
+        std::vector<proto::EntityState> entities;
+        bool valid = false;
+    };
+
+    void handleMessage(net::ByteReader& r, double now);
+    void readSnapshot(net::ByteReader& r, double now);
+    void predict();
+    const Snapshot* findSnapshot(uint32_t tick) const;
+    void sendConnectPacket(double now);
+
+    State state_ = State::Disconnected;
+    bool remote_ = false;
     std::unique_ptr<net::NetChannel> channel_;
-    bool gotServerInfo_ = false;
+    net::UdpSocket socket_;
+    net::Address serverAddress_;
+    net::UdpChannel* udp_ = nullptr;
+    std::string playerName_, password_;
+    double nextConnectAttempt_ = 0, connectDeadline_ = 0;
+    std::string disconnectReason_;
+
     std::string mapName_;
+    bool mapPending_ = false;
+    std::shared_ptr<const bsp::BspData> map_;
     float serverTickInterval_ = 1.0f / 66.0f;
+    std::vector<std::string> modelTable_;
+    int slot_ = -1;
 
     QAngle viewAngles_;
     uint32_t commandNumber_ = 0;
+    std::deque<UserCmd> commands_; // sent, not yet acknowledged
 
-    uint32_t snapshots_ = 0;
-    uint32_t serverTick_ = 0;
-    proto::PlayerState previous_, current_;
+    std::array<Snapshot, 32> snapshots_;
+    uint32_t latestTick_ = 0;
+    double clientTime_ = 0;     // our estimate of server time, advanced per frame
+    bool haveClock_ = false;
 
-    std::vector<std::string> modelTable_;
-    struct EntityHistory {
-        proto::EntityState previous, current;
-        uint32_t lastSeen = 0; // snapshot number
-    };
-    std::map<uint16_t, EntityHistory> entities_;
+    proto::PlayerState predicted_, previousPredicted_;
+    Vec3 predictionError_{0};   // smoothed away over cl_smoothtime
+    float lastErrorSize_ = 0;
+    std::vector<std::pair<uint32_t, Vec3>> predictedHistory_; // command number -> predicted origin
+
     std::string centerMessage_;
-    std::vector<SoundEvent> sounds_;
     double centerMessageTime_ = -1e9;
+    std::vector<SoundEvent> sounds_;
+    int snapshotsThisSecond_ = 0, snapshotsPerSec_ = 0;
+    double snapshotCounterStart_ = 0;
 };
 
 } // namespace k

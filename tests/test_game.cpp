@@ -26,14 +26,15 @@ struct TestGame {
         std::shared_ptr<const bsp::BspData> map;
         if (withMap) map = std::make_shared<const bsp::BspData>(k::test::testRoom());
         world->levelInit("test", map);
+        world->clientConnect(0, "tester");
         if (!withMap) spawn({{"classname", "point_message"}, {"targetname", "msg"}});
     }
     BaseEntity* spawn(const bsp::Entity& e) { return world->spawnEntity(e); }
     void run(float seconds, UserCmd cmd = {}) {
         int ticks = static_cast<int>(seconds / kDt + 0.5f);
         for (int i = 0; i < ticks; ++i) {
-            world->runCommand(cmd, kDt);
-            world->frame(kDt);
+            world->runCommand(0, cmd, kDt);
+            world->frame(kDt, 0);
         }
     }
     bool said(const std::string& m) const { return std::find(messages.begin(), messages.end(), m) != messages.end(); }
@@ -121,10 +122,10 @@ TEST_CASE("game: map entities spawn from the BSP") {
     CHECK(g.world->findFirstByName("door1") != nullptr);
     CHECK(g.world->findFirstByName("button1") != nullptr);
     CHECK(g.world->findFirstByName("lift") != nullptr);
-    CHECK(g.world->playerState().origin.x == doctest::Approx(128.0f));
+    CHECK(g.world->playerState(0).origin.x == doctest::Approx(128.0f));
     // Brush entities are networked with "*N" models.
     std::vector<proto::EntityState> states;
-    g.world->buildEntityStates(states);
+    g.world->buildEntityStates(0, states);
     CHECK(states.size() >= 3);
     bool found = false;
     for (auto& m : g.world->modelTable()) found |= !m.empty() && m[0] == '*';
@@ -151,17 +152,17 @@ TEST_CASE("game: doors block until opened, then move out of the way") {
 
 TEST_CASE("game: triggers fire on enter and leave") {
     TestGame g(true);
-    g.world->setPlayerOrigin({-175, 125, 0});
+    g.world->setPlayerOrigin(0, {-175, 125, 0});
     g.run(0.1f);
     CHECK(g.said("triggered"));
-    g.world->setPlayerOrigin({0, -150, 0});
+    g.world->setPlayerOrigin(0, {0, -150, 0});
     g.run(0.1f);
     CHECK(g.said("left"));
 }
 
 TEST_CASE("game: +use presses a button the player is looking at") {
     TestGame g(true);
-    g.world->setPlayerOrigin({200, 56, 0}); // eyes at z 64, button at z 48..80 on the east wall
+    g.world->setPlayerOrigin(0, {200, 56, 0}); // eyes at z 64, button at z 48..80 on the east wall
     UserCmd look;
     look.viewAngles = {0, 0, 0};
     g.run(0.05f, look);
@@ -171,7 +172,7 @@ TEST_CASE("game: +use presses a button the player is looking at") {
     CHECK(g.said("pressed"));
     // Looking away: nothing.
     TestGame g2(true);
-    g2.world->setPlayerOrigin({200, 56, 0});
+    g2.world->setPlayerOrigin(0, {200, 56, 0});
     UserCmd away;
     away.viewAngles = {0, 180, 0};
     g2.run(0.05f, away);
@@ -182,13 +183,13 @@ TEST_CASE("game: +use presses a button the player is looking at") {
 
 TEST_CASE("game: elevators carry the player") {
     TestGame g(true);
-    g.world->setPlayerOrigin({-184, -32, 9}); // standing on the 8-unit lift platform
+    g.world->setPlayerOrigin(0, {-184, -32, 9}); // standing on the 8-unit lift platform
     g.run(0.3f);
-    REQUIRE(g.world->playerState().groundEntity == g.world->findFirstByName("lift")->index);
-    float before = g.world->playerState().origin.z;
+    REQUIRE(g.world->playerState(0).groundEntity == g.world->findFirstByName("lift")->index);
+    float before = g.world->playerState(0).origin.z;
     g.world->deliverInput("lift", "Open", "", nullptr, nullptr);
     g.run(1.0f); // rises 64 units at 100 u/s
     auto* lift = g.world->findFirstByName("lift");
     CHECK(lift->origin.z == doctest::Approx(64.0f));
-    CHECK(g.world->playerState().origin.z == doctest::Approx(before + 64.0f).epsilon(0.02));
+    CHECK(g.world->playerState(0).origin.z == doctest::Approx(before + 64.0f).epsilon(0.02));
 }

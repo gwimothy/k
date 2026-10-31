@@ -14,11 +14,24 @@
 
 namespace k::net {
 
+struct NetStats {
+    float rttMs = 0;        // smoothed round-trip time
+    float lossPercent = 0;  // incoming packets missing, recent average
+    float inBytesPerSec = 0, outBytesPerSec = 0;
+};
+
 class NetChannel {
 public:
     virtual ~NetChannel() = default;
+    // Unreliable: may be lost, never duplicated, never delivered out of order.
     virtual void send(std::span<const uint8_t> message) = 0;
+    // Reliable: delivered once, in order, eventually.
+    virtual void sendReliable(std::span<const uint8_t> message) { send(message); }
     virtual std::optional<std::vector<uint8_t>> receive() = 0;
+    // Flush queued messages as a packet (UDP). Call once per tick.
+    virtual void transmit(double /*now*/) {}
+    virtual NetStats stats() const { return {}; }
+    virtual bool timedOut(double /*now*/) const { return false; }
 };
 
 // Two queues shared by both ends of a loopback connection.

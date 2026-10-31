@@ -24,6 +24,7 @@ struct LaunchOptions {
     std::string startupCommands; // the "+cmd args" part of the command line
     bool hasMapCommand = false;
     bool noSound = false;
+    bool hasConnectCommand = false;
 };
 
 LaunchOptions parseCommandLine(const std::vector<std::string>& args);
@@ -37,6 +38,8 @@ public:
 
     // Console command handlers.
     void startMap(const std::string& name);
+    void connect(const std::string& address, const std::string& password);
+    void printStatus();
     void disconnect();
     void quit() { quit_ = true; }
     void toggleConsole();
@@ -53,6 +56,7 @@ public:
     static Host* instance() { return instance_; }
 
 private:
+    std::shared_ptr<const bsp::BspData> loadMap(const std::string& name);
     bool initClient(const LaunchOptions& opts);
     void shutdownClient();
     void frame(double frameTime);
@@ -75,6 +79,7 @@ private:
 
     Server server_;
     Client client_;
+    std::shared_ptr<const bsp::BspData> serverMap_;
 
     std::unique_ptr<Window> window_;
     std::unique_ptr<Renderer> renderer_;

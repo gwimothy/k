@@ -129,6 +129,81 @@ def sky_face(face, size=128):
 # --------------------------------------------------------------------------------------
 # Test model: a 32x32x32 unit crate as binary glTF (.glb), origin at the bottom center.
 
+def box_glb(path, mins, maxs, material):
+    """An axis-aligned box model with per-face UVs (used for the placeholder player)."""
+    write_box_glb(path, mins, maxs, material)
+
+
+def write_box_glb(path, mins, maxs, material):
+    positions, normals, uvs, indices = [], [], [], []
+    (x0, y0, z0), (x1, y1, z1) = mins, maxs
+    faces = [
+        ((0, 0, 1), [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]),
+        ((0, 0, -1), [(x0, y1, z0), (x1, y1, z0), (x1, y0, z0), (x0, y0, z0)]),
+        ((1, 0, 0), [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)]),
+        ((-1, 0, 0), [(x0, y1, z0), (x0, y0, z0), (x0, y0, z1), (x0, y1, z1)]),
+        ((0, 1, 0), [(x1, y1, z0), (x0, y1, z0), (x0, y1, z1), (x1, y1, z1)]),
+        ((0, -1, 0), [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)]),
+    ]
+    for n, quad in faces:
+        base = len(positions)
+        for i, p in enumerate(quad):
+            positions.append(list(p))
+            normals.append(list(n))
+            uvs.append([(0, 1, 1, 0)[i], (1, 1, 0, 0)[i]])
+        indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+    _write_glb(path, positions, normals, uvs, indices, material, mins, maxs)
+
+
+def _write_glb(path, positions, normals, uvs, indices, material, mins, maxs):
+    def pack(fmt, rows):
+        return b"".join(struct.pack(fmt, *r) for r in rows)
+    pos_b, nrm_b, uv_b = pack("<3f", positions), pack("<3f", normals), pack("<2f", uvs)
+    idx_b = struct.pack("<%dH" % len(indices), *indices)
+    idx_b += b"\x00" * ((4 - len(idx_b) % 4) % 4)
+    blob = pos_b + nrm_b + uv_b + idx_b
+    offs = [0, len(pos_b), len(pos_b) + len(nrm_b), len(pos_b) + len(nrm_b) + len(uv_b)]
+    gltf = {
+        "asset": {"version": "2.0", "generator": "k gen_dev_assets.py"},
+        "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+        "materials": [{"name": material}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3, "material": 0}]}],
+        "buffers": [{"byteLength": len(blob)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": offs[0], "byteLength": len(pos_b), "target": 34962},
+            {"buffer": 0, "byteOffset": offs[1], "byteLength": len(nrm_b), "target": 34962},
+            {"buffer": 0, "byteOffset": offs[2], "byteLength": len(uv_b), "target": 34962},
+            {"buffer": 0, "byteOffset": offs[3], "byteLength": len(indices) * 2, "target": 34963},
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": len(positions), "type": "VEC3", "min": list(mins), "max": list(maxs)},
+            {"bufferView": 1, "componentType": 5126, "count": len(normals), "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5126, "count": len(uvs), "type": "VEC2"},
+            {"bufferView": 3, "componentType": 5123, "count": len(indices), "type": "SCALAR"},
+        ],
+    }
+    js = json.dumps(gltf, separators=(",", ":")).encode()
+    js += b" " * ((4 - len(js) % 4) % 4)
+    out = struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(js) + 8 + len(blob))
+    out += struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(blob), 0x004E4942) + blob
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(out)
+
+
+def player_texture(size=64):
+    px = bytearray(size * size * 3)
+    for y in range(size):
+        for x in range(size):
+            visor = 8 < y < 18 and 12 < x < 52  # a visor stripe near the top
+            r, g, b = (60, 200, 230) if visor else (200, 90, 60)
+            if x < 2 or y < 2 or x >= size - 2 or y >= size - 2:
+                r, g, b = r // 2, g // 2, b // 2
+            i = (y * size + x) * 3
+            px[i:i + 3] = bytes((r, g, b))
+    return size, size, px
+
+
 def crate_glb(path, half=16.0):
     positions, normals, uvs, indices = [], [], [], []
     faces = [
@@ -217,6 +292,9 @@ def main():
     for face in ("px", "nx", "py", "ny", "pz", "nz"):
         write_png(os.path.join(ROOT, "materials", "skybox", "sky_day_" + face + ".png"), *sky_face(face))
     crate_glb(os.path.join(ROOT, "models", "props", "crate.glb"))
+    write_png(os.path.join(ROOT, "materials", "models", "player", "placeholder.png"), *player_texture())
+    write_box_glb(os.path.join(ROOT, "models", "player", "placeholder.glb"), (-16, -16, 0), (16, 16, 72),
+                  "models/player/placeholder")
     print("Generated assets in", os.path.normpath(ROOT))
 
 

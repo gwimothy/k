@@ -19,6 +19,7 @@ struct PhysGame {
         fs::addSearchPath(K_SOURCE_DIR "/base", "GAME");
         world = std::make_unique<GameWorld>(EngineServices{});
         world->levelInit("test", std::make_shared<const bsp::BspData>(k::test::testRoom()));
+        world->clientConnect(0, "tester");
     }
     ~PhysGame() { fs::clearSearchPaths(); }
     BaseEntity* crate(const Vec3& origin) {
@@ -28,8 +29,8 @@ struct PhysGame {
     }
     void run(float seconds, UserCmd cmd = {}) {
         for (int i = 0; i < static_cast<int>(seconds / kDt + 0.5f); ++i) {
-            world->runCommand(cmd, kDt);
-            world->frame(kDt);
+            world->runCommand(0, cmd, kDt);
+            world->frame(kDt, 0);
         }
     }
 };
@@ -65,12 +66,12 @@ TEST_CASE("physics: the player is blocked by and pushes a crate") {
     auto* c = g.crate({0, -150, 0});
     g.run(0.5f);
     float startX = c->origin.x;
-    g.world->setPlayerOrigin({-120, -150, 0});
+    g.world->setPlayerOrigin(0, {-120, -150, 0});
     UserCmd walk;
     walk.forwardMove = 450; // east, into the crate
     g.run(1.5f, walk);
     // The player didn't walk through it...
-    CHECK(g.world->playerState().origin.x < c->origin.x);
+    CHECK(g.world->playerState(0).origin.x < c->origin.x);
     // ...and it moved.
     CHECK(c->origin.x > startX + 20.0f);
 }
@@ -79,7 +80,7 @@ TEST_CASE("physics: +use picks a crate up, +attack throws it") {
     PhysGame g;
     auto* c = g.crate({160, 0, 0});
     g.run(0.5f);
-    g.world->setPlayerOrigin({100, 0, 0});
+    g.world->setPlayerOrigin(0, {100, 0, 0});
     UserCmd look;
     look.viewAngles = {30, 0, 0}; // look down at it
     g.run(0.1f, look);

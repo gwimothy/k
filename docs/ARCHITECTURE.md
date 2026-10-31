@@ -35,7 +35,8 @@ Libraries in the build:
 
 | Target | Contents | Depends on |
 |---|---|---|
-| `k_core` | `core/`, `shared/` movement, header-only `net/` | glm |
+| `k_core` | `core/` | glm |
+| `k_net` | UDP sockets, net channel, protocol deltas | k_core |
 | `k_assets` | KeyValues, mesh building, glTF parsing (no GPU) | k_core, cgltf |
 | `k_game` | entities, I/O, physics, game rules | k_assets, Jolt |
 | `k_audio` | sound scripts, playback | k_assets, miniaudio |
@@ -78,6 +79,28 @@ the client connection and snapshots, and calls the game through `IGameServer`.
 - Networked entities go in every snapshot as `EntityState` (model index, origin, angles,
   effects). The client interpolates them, and the renderer draws brush models with an
   offset and props with a transform.
+
+## Networking
+
+```
+client                                        server
+  input → UserCmd ──(unreliable, last 3)──►     run each new command (shared movement)
+  predict: server state + unacked commands      game frame, physics
+  interpolate entities cl_interp in the past ◄─ snapshot: player state + entity delta
+  ack newest snapshot tick in each Move         (vs the client's last acked snapshot)
+```
+
+- `net/udp_channel`: every packet carries a sequence, an ack, a reliable ack, the in-flight
+  reliable block (resent until acked), and unreliable messages. The single-player client uses
+  a loopback channel with the same interface.
+- The server keeps the last 32 snapshots per client. Each new one is delta-encoded against
+  the newest snapshot that client acknowledged; if the client didn't receive the baseline, it
+  ignores the snapshot and the server falls back to an older ack.
+- Prediction runs the same `playerMove` as the server against the map and the brush
+  entities in the latest snapshot. When a snapshot shows the server disagreed, the
+  difference is added to a view offset that decays over `cl_smoothtime`.
+- Hitscan rewinds other players to the tick the shooter was rendering (`UserCmd::tickCount`)
+  using a one-second history of player positions.
 
 ## Physics and audio
 

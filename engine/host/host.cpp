@@ -46,6 +46,9 @@ ConVar mat_vsync("mat_vsync", "1", FCVAR_ARCHIVE, "Wait for vertical sync.");
 ConVar cl_showfps("cl_showfps", "0", FCVAR_ARCHIVE, "Show frame rate.");
 ConVar cl_showpos("cl_showpos", "0", FCVAR_ARCHIVE, "Show player position and velocity.");
 ConVar player_name("name", "player", FCVAR_ARCHIVE, "Your player name.");
+ConVar hostport("hostport", "27015", FCVAR_NONE, "UDP port the server listens on.", 1.0f, 65535.0f);
+ConVar sv_listen("sv_listen", "1", FCVAR_ARCHIVE, "Let other players join games you start with 'map'.");
+ConVar net_graph("net_graph", "0", FCVAR_ARCHIVE, "Show network stats (ping, loss, bandwidth, prediction).");
 
 // Every server tick uses at most this many iterations per frame so a long hitch can't
 // snowball into a "spiral of death".
@@ -86,6 +89,17 @@ ConCommand cmd_map(
         if (host()) host()->startMap(a.arg(1));
     },
     "Start a local server on a map.", FCVAR_NONE, completeMapName);
+ConCommand cmd_connect(
+    "connect",
+    [](const CmdArgs& a) {
+        if (a.argc() < 2) {
+            log::info("Usage: connect <address[:port]> [password]");
+            return;
+        }
+        if (host()) host()->connect(a.arg(1), a.arg(2));
+    },
+    "Join a server.");
+ConCommand cmd_status("status", [](const CmdArgs&) { if (host()) host()->printStatus(); }, "Show the server and connection status.");
 ConCommand cmd_disconnect("disconnect", [](const CmdArgs&) { if (host()) host()->disconnect(); }, "Leave the current game.");
 ConCommand cmd_toggleconsole("toggleconsole", [](const CmdArgs&) { if (host()) host()->toggleConsole(); }, "Show/hide the console.");
 ConCommand cmd_screenshot("screenshot", [](const CmdArgs&) { if (host()) host()->screenshot(); }, "Save a PNG screenshot to screenshots/.");
@@ -215,6 +229,7 @@ LaunchOptions parseCommandLine(const std::vector<std::string>& args) {
             // "+cmd arg arg" up to the next +/- token.
             std::string statement = a.substr(1);
             if (statement == "map") o.hasMapCommand = true;
+            if (statement == "connect") o.hasConnectCommand = true;
             while (i + 1 < args.size() && (args[i + 1].empty() || (args[i + 1][0] != '+' &&
                                                                    (args[i + 1][0] != '-' || looksLikeNumber(args[i + 1]))))) {
                 const std::string& arg = args[++i];
@@ -259,7 +274,7 @@ int Host::run(const std::vector<std::string>& args) {
     if (fs::exists("cfg/config.cfg")) cmd::append("exec config.cfg");
     if (fs::exists("cfg/autoexec.cfg")) cmd::append("exec autoexec.cfg");
     // With no +map on the command line, load the test map first so +commands run in-game.
-    if (!opts_.hasMapCommand && !opts_.dedicated) cmd::append("map devroom");
+    if (!opts_.hasMapCommand && !opts_.hasConnectCommand && !opts_.dedicated) cmd::append("map devroom");
     cmd::append(opts_.startupCommands);
 
     double last = platformTime();
@@ -337,10 +352,23 @@ void Host::frame(double frameTime) {
     if (window_) pumpEvents();
     if (opts_.dedicated) stdinReader().flushInto();
     cmd::execute();
+    double now = platformTime();
+
+    // The client may have been told to load a map (remote server or our own).
+    if (auto mapName = client_.takeMapToLoad()) {
+        auto map = server_.active() && server_.mapName() == *mapName && server_.map() ? serverMap_ : loadMap(*mapName);
+        if (!map) {
+            client_.disconnect("Missing map '" + *mapName + "'");
+        } else {
+            client_.setMap(map);
+            if (renderer_) renderer_->loadMap(map);
+        }
+    }
 
     float alpha = 1.0f;
-    if (server_.active()) {
-        const double interval = server_.tickInterval();
+    double interval = server_.active() ? server_.tickInterval() : client_.tickInterval();
+    bool ticking = server_.active() || client_.state() != Client::State::Disconnected;
+    if (ticking) {
         tickAccumulator_ += frameTime * host_timescale.getFloat();
         int ticks = 0;
         while (tickAccumulator_ >= interval) {
@@ -348,9 +376,10 @@ void Host::frame(double frameTime) {
                 tickAccumulator_ = 0.0;
                 break;
             }
-            if (client_.connected()) client_.createMove(static_cast<float>(interval));
-            server_.tick();
-            client_.readPackets();
+            client_.readPackets(now);
+            client_.tick(now, static_cast<float>(interval));
+            if (server_.active()) server_.tick(now);
+            client_.readPackets(now);
             tickAccumulator_ -= interval;
             ++hostTicks_;
             if (host_maxticks.getInt() > 0 && hostTicks_ >= static_cast<uint64_t>(host_maxticks.getInt())) {
@@ -361,6 +390,8 @@ void Host::frame(double frameTime) {
         }
         alpha = static_cast<float>(tickAccumulator_ / interval);
     }
+    client_.readPackets(now);
+    client_.advance(static_cast<float>(frameTime));
 
     if (window_) {
         client_.frameMouse(mouseDx_, mouseDy_);
@@ -450,7 +481,7 @@ void Host::updateMouseCapture() {
 void Host::renderFrame(float alpha) {
     renderer_->beginFrame();
     if (client_.active()) {
-        client_.renderEntities(alpha, frameEntities_);
+        client_.renderEntities(frameEntities_);
         ViewSetup view = client_.view(alpha);
         renderer_->renderView(view, frameEntities_);
         if (audio_) {
@@ -501,7 +532,7 @@ void Host::drawOverlay() {
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * scale, pos,
                     IM_COL32(255, 235, 170, static_cast<int>(255 * alpha)), text);
     }
-    if (!cl_showfps.getBool() && !cl_showpos.getBool()) return;
+    if (!cl_showfps.getBool() && !cl_showpos.getBool() && !net_graph.getBool()) return;
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 10, 10), ImGuiCond_Always, ImVec2(1, 0));
     ImGui::SetNextWindowBgAlpha(0.35f);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -515,9 +546,17 @@ void Host::drawOverlay() {
             ImGui::Text("%zu textures, %zu materials, %zu models", renderer_->textures().count(),
                         renderer_->materials().count(), renderer_->models().count());
         }
+        if (net_graph.getBool() && client_.connected()) {
+            auto g = client_.netGraph();
+            ImGui::Text("ping %.0f ms  loss %.0f%%", g.net.rttMs, g.net.lossPercent);
+            ImGui::Text("in %.1f KB/s  out %.1f KB/s", g.net.inBytesPerSec / 1024.0f, g.net.outBytesPerSec / 1024.0f);
+            ImGui::Text("snapshots %d/s  interp %.0f ms", g.snapshotsPerSec, g.interpMs);
+            ImGui::Text("prediction error %.2f", g.predictionError);
+        }
         if (cl_showpos.getBool()) {
             const auto& p = client_.latestState();
             auto v = client_.view(1.0f);
+            (void)v;
             ImGui::Text("pos: %.1f %.1f %.1f", p.origin.x, p.origin.y, p.origin.z);
             if (auto* ws = renderer_->worldStats())
                 ImGui::Text("leaf %d: %zu leaves, %zu faces visible", ws->cameraLeaf, ws->visibleLeaves, ws->visibleFaces);
@@ -530,28 +569,55 @@ void Host::drawOverlay() {
     ImGui::End();
 }
 
-void Host::startMap(const std::string& name) {
+std::shared_ptr<const bsp::BspData> Host::loadMap(const std::string& name) {
     auto bytes = fs::readBinary("maps/" + name + ".kbsp");
     if (!bytes) {
         log::error("map: couldn't find maps/{}.kbsp", name);
-        return;
+        return nullptr;
     }
     std::string error;
     auto parsed = bsp::read(*bytes, &error);
     if (!parsed) {
         log::error("map: maps/{}.kbsp is invalid: {}", name, error);
-        return;
+        return nullptr;
     }
-    auto map = std::make_shared<const bsp::BspData>(std::move(*parsed));
+    return std::make_shared<const bsp::BspData>(std::move(*parsed));
+}
 
+void Host::startMap(const std::string& name) {
+    auto map = loadMap(name);
+    if (!map) return;
     disconnect();
-    auto [clientEnd, serverEnd] = net::LoopbackChannel::createPair();
-    if (!server_.start(name, map, std::move(serverEnd))) return;
+    serverMap_ = map;
+    uint16_t port = (opts_.dedicated || sv_listen.getBool()) ? static_cast<uint16_t>(hostport.getInt()) : 0;
+    if (!server_.start(name, map, port)) return;
     tickAccumulator_ = 0.0;
     if (!opts_.dedicated) {
-        renderer_->loadMap(map);
-        client_.connect(std::move(clientEnd), player_name.getString());
+        auto [clientEnd, serverEnd] = net::LoopbackChannel::createPair();
+        server_.addLocalClient(std::move(serverEnd));
+        client_.connectLocal(std::move(clientEnd), player_name.getString());
     }
+}
+
+void Host::connect(const std::string& address, const std::string& password) {
+    auto addr = net::resolveAddress(address, proto::kDefaultPort);
+    if (!addr) {
+        log::error("connect: can't resolve '{}'", address);
+        return;
+    }
+    disconnect();
+    tickAccumulator_ = 0.0;
+    client_.connectRemote(*addr, player_name.getString(), password);
+}
+
+void Host::printStatus() {
+    if (server_.active()) server_.printStatus();
+    if (client_.connected()) {
+        auto g = client_.netGraph();
+        log::info("client: {} on '{}', ping {:.0f} ms, loss {:.0f}%", client_.remote() ? "remote" : "local",
+                  client_.mapName(), g.net.rttMs, g.net.lossPercent);
+    }
+    if (!server_.active() && !client_.connected()) log::info("Not connected.");
 }
 
 void Host::playSound(const std::string& name) {
@@ -564,6 +630,7 @@ void Host::disconnect() {
     if (audio_) audio_->stopAll();
     client_.disconnect();
     server_.stop();
+    serverMap_.reset();
     if (renderer_) renderer_->unloadMap();
 }
 
@@ -585,7 +652,8 @@ void Host::reloadShaders() {
 }
 
 void Host::setPos(const Vec3& origin) {
-    if (server_.active()) server_.setPlayerOrigin(origin);
+    if (server_.active() && server_.localSlot() >= 0) server_.setPlayerOrigin(origin);
+    else forwardToServer("setpos " + std::to_string(origin.x) + " " + std::to_string(origin.y) + " " + std::to_string(origin.z));
 }
 
 void Host::setAng(const QAngle& angles) { client_.setViewAngles(angles); }
@@ -599,7 +667,7 @@ void Host::forwardToServer(const std::string& text) {
 }
 
 void Host::printPos() {
-    const auto& p = server_.player();
+    const auto& p = server_.active() && server_.localSlot() >= 0 ? server_.player() : client_.latestState();
     const auto& a = client_.viewAngles();
     log::info("setpos {:.2f} {:.2f} {:.2f}; setang {:.2f} {:.2f} {:.2f}", p.origin.x, p.origin.y, p.origin.z, a.pitch,
               a.yaw, a.roll);

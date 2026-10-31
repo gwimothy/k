@@ -4,10 +4,11 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phases 1-6 done** (foundation, rendering, map pipeline, movement, entities,
-> physics and audio). Build maps in TrenchBroom, compile them with `kbsp` (BSP, vis, baked
-> lighting), wire up doors, buttons, elevators and triggers with Source-style entity I/O, push
-> and throw physics props, and hear it all in 3D.
+> Status: **Phases 1-7 done** (foundation, rendering, map pipeline, movement, entities,
+> physics, audio, networking). Build maps in TrenchBroom, compile them with `kbsp` (BSP, vis,
+> baked lighting), wire up doors, buttons, elevators and triggers with Source-style entity I/O,
+> push and throw physics props, and play together over the network with client-side prediction,
+> interpolation and lag compensation.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
@@ -54,6 +55,22 @@ Command-line options work like Source:
 ./build/bin/k -dedicated +map devroom          # headless server, reads commands from stdin
 ./build/bin/k -nosound                         # don't open an audio device
 ```
+
+## Multiplayer
+
+Every game you start with `map` is also a listen server on UDP port 27015 (`sv_listen 0` to
+turn that off). Others join with `connect`:
+
+```sh
+./build/bin/k +map devroom                         # host
+./build/bin/k +connect 192.168.1.20                # join (port defaults to 27015)
+./build/bin/k -dedicated +hostport 27015 +map devroom +sv_password secret
+./build/bin/k +connect myserver:27015 secret
+```
+
+`status` lists players with ping and loss, and `net_graph 1` shows ping, bandwidth, snapshot
+rate and prediction error. `+attack` fires a lag-compensated hitscan when you aren't holding
+a prop. To test bad networks, run `net_fakelag 150` and `net_fakeloss 10` (cheats).
 
 ## Making maps
 

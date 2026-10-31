@@ -1,6 +1,7 @@
 #include "game_world.h"
 
 #include "core/cvar.h"
+#include "core/keyvalues.h"
 #include "core/log.h"
 #include "shared/bsp_trace.h"
 
@@ -10,7 +11,7 @@
 namespace k::game {
 namespace {
 
-// Movement settings (replicated so client prediction will match later).
+// Movement settings (replicated so client prediction matches the server).
 ConVar sv_maxspeed("sv_maxspeed", "320", FCVAR_REPLICATED | FCVAR_NOTIFY, "Maximum player speed.");
 ConVar sv_accelerate("sv_accelerate", "10", FCVAR_REPLICATED | FCVAR_NOTIFY, "Ground acceleration.");
 ConVar sv_airaccelerate("sv_airaccelerate", "10", FCVAR_REPLICATED | FCVAR_NOTIFY, "Air acceleration.");
@@ -19,17 +20,20 @@ ConVar sv_stopspeed("sv_stopspeed", "100", FCVAR_REPLICATED | FCVAR_NOTIFY, "Min
 ConVar sv_gravity("sv_gravity", "800", FCVAR_REPLICATED | FCVAR_NOTIFY, "World gravity.");
 ConVar sv_stepsize("sv_stepsize", "18", FCVAR_REPLICATED | FCVAR_NOTIFY, "Maximum step-up height.");
 ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "Holding jump re-jumps on landing.");
-ConVar sv_noclipspeed("sv_noclipspeed", "5", FCVAR_ARCHIVE | FCVAR_NOTIFY, "Noclip speed multiplier.");
-ConVar sv_noclipaccelerate("sv_noclipaccelerate", "5", FCVAR_ARCHIVE | FCVAR_NOTIFY, "Noclip acceleration.");
+ConVar sv_noclipspeed("sv_noclipspeed", "5", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Noclip speed multiplier.");
+ConVar sv_noclipaccelerate("sv_noclipaccelerate", "5", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Noclip acceleration.");
+ConVar sv_lagcompensation("sv_lagcompensation", "1", FCVAR_NONE, "Rewind players to what the shooter saw.");
 ConVar developer_io("developer_io", "0", FCVAR_NONE, "Log every entity I/O event as it fires.");
 
 constexpr float kUseDistance = 72.0f;
+constexpr float kHitscanRange = 8192.0f;
+constexpr double kHistorySeconds = 1.0;
 
 bool boxesOverlap(const Vec3& amin, const Vec3& amax, const Vec3& bmin, const Vec3& bmax) {
     return amin.x < bmax.x && amax.x > bmin.x && amin.y < bmax.y && amax.y > bmin.y && amin.z < bmax.z && amax.z > bmin.z;
 }
 
-// Ray vs AABB (slab test). Returns the entry distance or -1.
+// Ray vs AABB (slab test). Returns the entry distance along `dir` (unit or not) or -1.
 float rayBox(const Vec3& o, const Vec3& dir, const Vec3& mn, const Vec3& mx) {
     float tmin = 0, tmax = 1e30f;
     for (int i = 0; i < 3; ++i) {
@@ -44,6 +48,34 @@ float rayBox(const Vec3& o, const Vec3& dir, const Vec3& mn, const Vec3& mx) {
         if (tmin > tmax) return -1;
     }
     return tmin;
+}
+
+// Swept box against an axis-aligned box. Returns fraction and fills the normal, or -1.
+// Starting inside counts as a miss (so overlapping objects never trap each other).
+float sweepBox(const Vec3& start, const Vec3& end, const Vec3& mins, const Vec3& maxs, const Vec3& boxMin,
+               const Vec3& boxMax, Vec3& normal) {
+    Vec3 bmin = boxMin - maxs, bmax = boxMax - mins; // Minkowski-expanded
+    Vec3 dir = end - start;
+    float tEnter = 0, tExit = 1;
+    int axis = -1;
+    bool inside = true;
+    for (int i = 0; i < 3; ++i) {
+        if (start[i] < bmin[i] || start[i] > bmax[i]) inside = false;
+        if (std::fabs(dir[i]) < 1e-7f) {
+            if (start[i] < bmin[i] || start[i] > bmax[i]) return -1;
+            continue;
+        }
+        float t1 = (bmin[i] - start[i]) / dir[i], t2 = (bmax[i] - start[i]) / dir[i];
+        if (t1 > t2) std::swap(t1, t2);
+        if (t1 > tEnter) { tEnter = t1; axis = i; }
+        tExit = std::min(tExit, t2);
+        if (tEnter > tExit) return -1;
+    }
+    if (inside || axis < 0) return -1;
+    float len = glm::length(dir);
+    normal = Vec3(0);
+    normal[axis] = dir[axis] > 0 ? -1.0f : 1.0f;
+    return std::max(0.0f, tEnter - (len > 0 ? bsp::kDistEpsilon / len : 0.0f));
 }
 
 } // namespace
@@ -91,7 +123,8 @@ GameWorld::GameWorld(EngineServices services) : services_(std::move(services)) {
     linkEntities_misc();
     linkEntities_props();
 }
-GameWorld::~GameWorld() = default;
+
+GameWorld::~GameWorld() { levelShutdown(); }
 
 std::unique_ptr<IGameServer> createGameServer(EngineServices services) {
     return std::make_unique<GameWorld>(std::move(services));
@@ -115,6 +148,17 @@ int GameWorld::addEntity(std::unique_ptr<BaseEntity> e) {
 
 BaseEntity* GameWorld::entity(int index) const {
     return (index >= 0 && static_cast<size_t>(index) < entities_.size()) ? entities_[static_cast<size_t>(index)].get() : nullptr;
+}
+
+Player* GameWorld::player(int slot) const {
+    return (slot >= 0 && slot < proto::kMaxClients) ? players_[static_cast<size_t>(slot)] : nullptr;
+}
+
+std::vector<Player*> GameWorld::players() const {
+    std::vector<Player*> out;
+    for (auto* p : players_)
+        if (p) out.push_back(p);
+    return out;
 }
 
 std::vector<BaseEntity*> GameWorld::findByName(const std::string& pattern) const {
@@ -156,29 +200,22 @@ bool GameWorld::levelInit(const std::string& /*mapName*/, std::shared_ptr<const 
     physics_ = std::make_unique<PhysicsWorld>();
     if (map_) physics_->loadWorld(*map_);
 
-    // Slot 0 is the world; slot 1 is reserved for the player.
+    // Slot 0 is the world.
     auto worldEnt = std::make_unique<BaseEntity>();
     worldEnt->classname = "worldspawn";
     worldEnt->world_ = this;
     entities_.push_back(std::move(worldEnt));
-    auto p = std::make_unique<Player>();
-    p->classname = "player";
-    player_ = p.get();
-    addEntity(std::move(p));
 
     if (map_) {
         for (size_t i = 1; i < map_->entities.size(); ++i) spawnEntity(map_->entities[i]);
         if (auto* start = map_->findEntity("info_player_start")) {
             Vec3 a = bsp::entityVec3(*start, "angles");
             spawnAngles_ = {a.x, a.y, a.z};
-            player_->state.origin = bsp::entityVec3(*start, "origin");
+            spawnOrigin_ = bsp::entityVec3(*start, "origin");
         } else {
             log::warn("Map has no info_player_start; spawning at the origin");
         }
     }
-    player_->state.viewAngles = spawnAngles_;
-    player_->origin = player_->state.origin;
-
     for (auto& e : entities_)
         if (e) e->activate();
     buildModelTable();
@@ -187,17 +224,18 @@ bool GameWorld::levelInit(const std::string& /*mapName*/, std::shared_ptr<const 
 
 void GameWorld::levelShutdown() {
     events_.clear();
-    touching_.clear();
+    players_.fill(nullptr);
     entities_.clear(); // before physics_: entities may own bodies
     physics_.reset();
-    heldProp_ = -1;
     modelTable_.clear();
-    player_ = nullptr;
+    history_.clear();
+    propMotion_.clear();
     map_.reset();
 }
 
 void GameWorld::buildModelTable() {
     modelTable_.assign(1, ""); // 0 = no model
+    modelTable_.push_back(kPlayerModel);
     for (auto& e : entities_) {
         if (!e || !e->networked) continue;
         std::string name = e->brushModel > 0 ? "*" + std::to_string(e->brushModel) : e->modelPath;
@@ -206,10 +244,44 @@ void GameWorld::buildModelTable() {
     }
 }
 
-void GameWorld::buildEntityStates(std::vector<proto::EntityState>& out) const {
+void GameWorld::clientConnect(int slot, const std::string& name) {
+    if (slot < 0 || slot >= proto::kMaxClients) return;
+    clientDisconnect(slot);
+    auto p = std::make_unique<Player>();
+    p->classname = "player";
+    p->slot = slot;
+    p->name = name;
+    p->networked = true;
+    p->modelPath = kPlayerModel;
+    // Spread players out a little so they don't spawn inside each other.
+    Vec3 offset(0);
+    int others = static_cast<int>(players().size());
+    if (others > 0) offset = Vec3(std::cos(others * 1.3f), std::sin(others * 1.3f), 0) * 48.0f;
+    p->state.origin = spawnOrigin_ + offset;
+    p->state.viewAngles = spawnAngles_;
+    p->origin = p->state.origin;
+    Player* raw = p.get();
+    addEntity(std::move(p));
+    players_[static_cast<size_t>(slot)] = raw;
+}
+
+void GameWorld::clientDisconnect(int slot) {
+    Player* p = player(slot);
+    if (!p) return;
+    for (int t : p->touching)
+        if (auto* e = entity(t)) e->endTouch(p);
+    p->markedForDeletion = true;
+    players_[static_cast<size_t>(slot)] = nullptr;
+    // Remove right away so the slot can be reused this tick.
+    for (auto& e : entities_)
+        if (e.get() == p) e.reset();
+}
+
+void GameWorld::buildEntityStates(int slot, std::vector<proto::EntityState>& out) const {
     out.clear();
+    const Player* self = player(slot);
     for (auto& e : entities_) {
-        if (!e || !e->networked) continue;
+        if (!e || !e->networked || e.get() == self) continue;
         std::string name = e->brushModel > 0 ? "*" + std::to_string(e->brushModel) : e->modelPath;
         auto it = std::find(modelTable_.begin(), modelTable_.end(), name);
         proto::EntityState s;
@@ -217,32 +289,37 @@ void GameWorld::buildEntityStates(std::vector<proto::EntityState>& out) const {
         s.model = static_cast<uint16_t>(it == modelTable_.end() ? 0 : it - modelTable_.begin());
         s.origin = e->origin;
         s.angles = e->angles;
+        if (auto* p = dynamic_cast<const Player*>(e.get())) s.angles = {0, p->state.viewAngles.yaw, 0};
         s.effects = e->effects;
         out.push_back(s);
     }
 }
 
-bool GameWorld::takeAngleOverride(QAngle& angles) {
-    if (!player_ || !player_->teleported) return false;
-    player_->teleported = false;
-    angles = player_->state.viewAngles;
-    return true;
-}
-
-void GameWorld::clientPutInServer(const std::string& name) {
-    if (player_) player_->name = name;
-}
-
-const proto::PlayerState& GameWorld::playerState() const {
+const proto::PlayerState& GameWorld::playerState(int slot) const {
     static const proto::PlayerState empty;
-    return player_ ? player_->state : empty;
+    const Player* p = player(slot);
+    return p ? p->state : empty;
 }
 
-void GameWorld::setPlayerOrigin(const Vec3& origin) {
-    if (!player_) return;
-    player_->state.origin = origin;
-    player_->state.velocity = Vec3(0);
-    player_->origin = origin;
+QAngle GameWorld::spawnAngles(int slot) const {
+    const Player* p = player(slot);
+    return p ? p->state.viewAngles : spawnAngles_;
+}
+
+void GameWorld::setPlayerOrigin(int slot, const Vec3& origin) {
+    Player* p = player(slot);
+    if (!p) return;
+    p->state.origin = origin;
+    p->state.velocity = Vec3(0);
+    p->origin = origin;
+}
+
+bool GameWorld::takeAngleOverride(int slot, QAngle& angles) {
+    Player* p = player(slot);
+    if (!p || !p->teleported) return false;
+    p->teleported = false;
+    angles = p->state.viewAngles;
+    return true;
 }
 
 bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const Vec3& mins, const Vec3& maxs,
@@ -251,43 +328,34 @@ bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const V
     best.endPos = end;
     if (map_) best = bsp::traceBox(*map_, start, end, mins, maxs, mask);
     if (best.allSolid || !map_) return best;
-    // Physics props block like boxes (their world bounds). Overlaps at the start are ignored
-    // so a prop that lands on the player can't trap them.
+
+    auto consider = [&](float frac, const Vec3& normal, int entity) {
+        if (frac < 0 || frac >= best.fraction) return false;
+        best.fraction = frac;
+        best.endPos = start + (end - start) * frac;
+        best.normal = normal;
+        best.entity = entity;
+        best.contents = bsp::CONTENTS_SOLID;
+        return true;
+    };
+
+    // Physics props and other players block like boxes.
+    int movingHeld = moving_ ? moving_->heldProp : -1;
     for (auto& e : entities_) {
-        if (!e || !e->physicsDriven || e->index == heldProp_) continue;
-        Vec3 bmin = e->absMins() - maxs, bmax = e->absMaxs() - mins; // Minkowski-expanded
-        Vec3 dir = end - start;
-        float tEnter = 0, tExit = 1;
-        int axis = -1;
-        bool inside = true, miss = false;
-        for (int i = 0; i < 3 && !miss; ++i) {
-            if (start[i] < bmin[i] || start[i] > bmax[i]) inside = false;
-            if (std::fabs(dir[i]) < 1e-7f) {
-                if (start[i] < bmin[i] || start[i] > bmax[i]) miss = true;
-                continue;
-            }
-            float t1 = (bmin[i] - start[i]) / dir[i], t2 = (bmax[i] - start[i]) / dir[i];
-            if (t1 > t2) std::swap(t1, t2);
-            if (t1 > tEnter) { tEnter = t1; axis = i; }
-            tExit = std::min(tExit, t2);
-            if (tEnter > tExit) miss = true;
-        }
-        if (miss || inside || axis < 0) continue;
-        float len = glm::length(dir);
-        float frac = std::max(0.0f, tEnter - (len > 0 ? bsp::kDistEpsilon / len : 0.0f));
-        if (frac < best.fraction) {
-            best.fraction = frac;
-            best.endPos = start + dir * frac;
-            best.normal = Vec3(0);
-            best.normal[axis] = dir[axis] > 0 ? -1.0f : 1.0f;
-            best.entity = e->index;
-            best.contents = bsp::CONTENTS_SOLID;
-            moveTouches_.push_back(e->index);
+        if (!e || e.get() == moving_) continue;
+        Vec3 normal;
+        if (e->physicsDriven && e->index != movingHeld) {
+            if (consider(sweepBox(start, end, mins, maxs, e->absMins(), e->absMaxs(), normal), normal, e->index))
+                moveTouches_.push_back(e->index);
+        } else if (auto* p = dynamic_cast<const Player*>(e.get())) {
+            if (p->state.moveType == MOVETYPE_NOCLIP || (moving_ && moving_->state.moveType == MOVETYPE_NOCLIP)) continue;
+            consider(sweepBox(start, end, mins, maxs, p->state.origin + p->mins(), p->state.origin + p->maxs(), normal),
+                     normal, e->index);
         }
     }
+    // Solid brush entities.
     for (auto& e : entities_) {
         if (!e || e->solid != Solid::Bsp || e->brushModel <= 0) continue;
-        // Cheap reject: swept box vs the entity's bounds.
         Vec3 smin = glm::min(start, end) + mins - Vec3(1), smax = glm::max(start, end) + maxs + Vec3(1);
         if (!boxesOverlap(smin, smax, e->absMins(), e->absMaxs())) continue;
         auto tr = bsp::traceBoxModel(*map_, e->brushModel, e->origin, start, end, mins, maxs, mask);
@@ -306,8 +374,9 @@ bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const V
     return best;
 }
 
-void GameWorld::runCommand(const UserCmd& cmd, float dt) {
-    if (!player_) return;
+void GameWorld::runCommand(int slot, const UserCmd& cmd, float dt) {
+    Player* p = player(slot);
+    if (!p) return;
     MoveParams params;
     params.maxSpeed = sv_maxspeed.getFloat();
     params.accelerate = sv_accelerate.getFloat();
@@ -320,32 +389,106 @@ void GameWorld::runCommand(const UserCmd& cmd, float dt) {
     params.autoBunnyhop = sv_autobunnyhopping.getBool();
     params.noclipSpeed = sv_noclipspeed.getFloat();
     params.noclipAccelerate = sv_noclipaccelerate.getFloat();
-    moveTouches_.clear();
-    Vec3 velocityBefore = player_->state.velocity;
-    proto::PlayerState stateBefore = player_->state;
-    playerMove(player_->state, cmd, dt, params, map_ ? static_cast<const TraceWorld*>(this) : nullptr);
-    player_->origin = player_->state.origin;
-    player_->angles = player_->state.viewAngles;
-    pushTouchedProps(velocityBefore);
-    playerSounds(stateBefore, dt);
 
-    if ((cmd.buttons & IN_USE) && !(player_->lastButtons & IN_USE)) handleUse();
-    updateHeldProp(cmd, dt);
-    player_->lastButtons = cmd.buttons;
-    touchTriggers();
+    moveTouches_.clear();
+    Vec3 velocityBefore = p->state.velocity;
+    proto::PlayerState stateBefore = p->state;
+    moving_ = p;
+    playerMove(p->state, cmd, dt, params, map_ ? static_cast<const TraceWorld*>(this) : nullptr);
+    moving_ = nullptr;
+    p->origin = p->state.origin;
+    p->angles = p->state.viewAngles;
+    pushTouchedProps(*p, velocityBefore);
+    playerSounds(*p, stateBefore, dt);
+
+    bool usePressed = (cmd.buttons & IN_USE) && !(p->lastButtons & IN_USE);
+    bool attackPressed = (cmd.buttons & IN_ATTACK) && !(p->lastButtons & IN_ATTACK);
+    if (usePressed) handleUse(*p);
+    if (attackPressed && p->heldProp < 0) {
+        Vec3 hit;
+        int what = fireHitscan(*p, cmd.tickCount, &hit);
+        if (auto* target = dynamic_cast<Player*>(entity(what))) {
+            log::info("{} hit {}", p->name, target->name);
+            if (services_.centerPrintTo) services_.centerPrintTo(p->slot, "Hit " + target->name + "!");
+            emitSound("Player.Hit", target, target->origin);
+        }
+    }
+    updateHeldProp(*p, cmd, dt);
+    p->lastButtons = cmd.buttons;
+    touchTriggers(*p);
 }
 
-void GameWorld::handleUse() {
-    Vec3 eye = player_->state.origin + Vec3(0, 0, player_->state.viewHeight);
+void GameWorld::recordHistory(uint32_t tick) {
+    HistoryFrame f;
+    f.tick = tick;
+    for (size_t i = 0; i < players_.size(); ++i) {
+        if (!players_[i]) continue;
+        f.present[i] = true;
+        f.origins[i] = players_[i]->state.origin;
+        f.ducking[i] = (players_[i]->state.flags & FL_DUCKING) != 0;
+    }
+    history_.push_back(f);
+    while (!history_.empty() && history_.size() > static_cast<size_t>(kHistorySeconds * 128)) history_.pop_front();
+}
+
+int GameWorld::fireHitscan(Player& shooter, uint32_t viewTick, Vec3* hitPos) {
+    Vec3 eye = shooter.state.origin + Vec3(0, 0, shooter.state.viewHeight);
     Vec3 forward;
-    angleVectors(player_->state.viewAngles, &forward);
+    angleVectors(shooter.state.viewAngles, &forward);
+    Vec3 end = eye + forward * kHitscanRange;
+    float wallFrac = map_ ? bsp::traceLine(*map_, eye, end).fraction : 1.0f;
+    float bestDist = wallFrac * kHitscanRange;
+    int hit = wallFrac < 1.0f ? 0 : -1;
+
+    // Where were the other players when the shooter saw them? Use the recorded frame for
+    // the tick the client was rendering (it interpolates entities in the past).
+    const HistoryFrame* frame = nullptr;
+    if (sv_lagcompensation.getBool() && viewTick > 0)
+        for (auto it = history_.rbegin(); it != history_.rend(); ++it)
+            if (it->tick <= viewTick) { frame = &*it; break; }
+
+    for (auto* target : players()) {
+        if (target == &shooter) continue;
+        Vec3 origin = target->state.origin;
+        bool ducking = (target->state.flags & FL_DUCKING) != 0;
+        if (frame && frame->present[static_cast<size_t>(target->slot)]) {
+            origin = frame->origins[static_cast<size_t>(target->slot)];
+            ducking = frame->ducking[static_cast<size_t>(target->slot)];
+        }
+        Vec3 mn = origin + (ducking ? kDuckHullMins : kHullMins), mx = origin + (ducking ? kDuckHullMaxs : kHullMaxs);
+        float d = rayBox(eye, forward, mn, mx);
+        if (d >= 0 && d < bestDist) {
+            bestDist = d;
+            hit = target->index;
+        }
+    }
+    for (auto& e : entities_) {
+        if (!e || !e->physicsDriven || e->index == shooter.heldProp) continue;
+        float d = rayBox(eye, forward, e->absMins(), e->absMaxs());
+        if (d >= 0 && d < bestDist) {
+            bestDist = d;
+            hit = e->index;
+        }
+    }
+    if (auto* prop = entity(hit); prop && prop->physicsDriven) {
+        physics_->wake(prop->physicsBody);
+        physics_->addImpulse(prop->physicsBody, forward * 300.0f * std::min(physics_->mass(prop->physicsBody), 40.0f));
+    }
+    if (hitPos) *hitPos = eye + forward * bestDist;
+    return hit;
+}
+
+void GameWorld::handleUse(Player& p) {
+    Vec3 eye = p.state.origin + Vec3(0, 0, p.state.viewHeight);
+    Vec3 forward;
+    angleVectors(p.state.viewAngles, &forward);
     // Nearest usable brush entity along the view ray, not behind a wall.
     float wallDist = kUseDistance;
     if (map_) wallDist = bsp::traceLine(*map_, eye, eye + forward * kUseDistance).fraction * kUseDistance;
     BaseEntity* best = nullptr;
     float bestDist = std::min(wallDist + 2.0f, kUseDistance);
     for (auto& e : entities_) {
-        if (!e || e->brushModel <= 0 || e.get() == player_) continue;
+        if (!e || e->brushModel <= 0) continue;
         float d = rayBox(eye, forward, e->absMins() - Vec3(2), e->absMaxs() + Vec3(2));
         if (d >= 0 && d <= bestDist) {
             bestDist = d;
@@ -353,49 +496,53 @@ void GameWorld::handleUse() {
         }
     }
     if (best) {
-        best->use(player_);
+        best->use(&p);
         return;
     }
-    if (heldProp_ >= 0) { // drop
-        heldProp_ = -1;
+    if (p.heldProp >= 0) { // drop
+        p.heldProp = -1;
         return;
     }
-    // Pick up the nearest light prop in front of us.
+    // Pick up the nearest light prop in front, unless someone else is holding it.
     float propDist = std::min(wallDist + 8.0f, 96.0f);
     for (auto& e : entities_) {
         if (!e || !e->physicsDriven) continue;
+        bool taken = false;
+        for (auto* other : players()) taken |= other->heldProp == e->index;
+        if (taken) continue;
         float d = rayBox(eye, forward, e->absMins(), e->absMaxs());
         if (d >= 0 && d <= propDist && physics_->mass(e->physicsBody) <= 60.0f) {
             propDist = d;
-            heldProp_ = e->index;
+            p.heldProp = e->index;
         }
     }
 }
 
-void GameWorld::updateHeldProp(const UserCmd& cmd, float dt) {
-    BaseEntity* prop = entity(heldProp_);
+void GameWorld::updateHeldProp(Player& p, const UserCmd& cmd, float dt) {
+    BaseEntity* prop = entity(p.heldProp);
     if (!prop || !prop->physicsDriven) {
-        heldProp_ = -1;
+        p.heldProp = -1;
         return;
     }
-    Vec3 eye = player_->state.origin + Vec3(0, 0, player_->state.viewHeight);
+    Vec3 eye = p.state.origin + Vec3(0, 0, p.state.viewHeight);
     Vec3 forward;
-    angleVectors(player_->state.viewAngles, &forward);
+    angleVectors(p.state.viewAngles, &forward);
     Vec3 center = (prop->absMins() + prop->absMaxs()) * 0.5f;
     float radius = glm::length(prop->absMaxs() - prop->absMins()) * 0.5f;
     if (cmd.buttons & IN_ATTACK) {
         // Throw.
-        physics_->setLinearVelocity(prop->physicsBody, forward * 700.0f + player_->state.velocity);
-        heldProp_ = -1;
+        physics_->setLinearVelocity(prop->physicsBody, forward * 700.0f + p.state.velocity);
+        p.heldProp = -1;
+        p.lastButtons |= IN_ATTACK; // don't also fire this tick
         return;
     }
     Vec3 target = eye + forward * (24.0f + radius);
     Vec3 toTarget = target - center;
     if (glm::length(toTarget) > 160.0f) { // snagged on something: let go
-        heldProp_ = -1;
+        p.heldProp = -1;
         return;
     }
-    Vec3 vel = toTarget / std::max(dt, 1e-3f) * 0.4f + player_->state.velocity;
+    Vec3 vel = toTarget / std::max(dt, 1e-3f) * 0.4f + p.state.velocity;
     float speed = glm::length(vel);
     if (speed > 1200.0f) vel *= 1200.0f / speed;
     physics_->wake(prop->physicsBody);
@@ -413,8 +560,8 @@ void GameWorld::stopSound(const std::string& name, const BaseEntity* entity) {
     if (services_.emitSound && entity) services_.emitSound(name, entity->index, entity->origin, 0.0f, true);
 }
 
-void GameWorld::playerSounds(const proto::PlayerState& before, float dt) {
-    const auto& s = player_->state;
+void GameWorld::playerSounds(Player& p, const proto::PlayerState& before, float dt) {
+    const auto& s = p.state;
     if (s.moveType == MOVETYPE_NOCLIP) return;
     bool wasGround = before.flags & FL_ONGROUND, onGround = s.flags & FL_ONGROUND;
     if (wasGround && !onGround && s.velocity.z > 200.0f) emitSound("Player.Jump", nullptr, s.origin, 1.0f);
@@ -423,13 +570,13 @@ void GameWorld::playerSounds(const proto::PlayerState& before, float dt) {
     // Footsteps: Source steps every ~0.3 s at run speed; quieter and slower when walking.
     float speed = glm::length(Vec2(s.velocity.x, s.velocity.y));
     if (onGround && speed > 90.0f && !(s.flags & FL_DUCKING)) {
-        footstepTimer_ -= dt;
-        if (footstepTimer_ <= 0) {
+        p.footstepTimer -= dt;
+        if (p.footstepTimer <= 0) {
             emitSound("Player.Footstep", nullptr, s.origin, speed > 200.0f ? 1.0f : 0.5f);
-            footstepTimer_ = speed > 200.0f ? 0.32f : 0.45f;
+            p.footstepTimer = speed > 200.0f ? 0.32f : 0.45f;
         }
     } else {
-        footstepTimer_ = 0.1f;
+        p.footstepTimer = 0.1f;
     }
 }
 
@@ -440,8 +587,10 @@ void GameWorld::propImpactSounds() {
         auto& m = propMotion_[static_cast<size_t>(e->index)];
         Vec3 v = physics_->linearVelocity(e->physicsBody);
         float change = glm::length(v - m.velocity);
-        // A sudden change in velocity that isn't the player carrying it = an impact.
-        if (change > 140.0f && e->index != heldProp_ && time_ - m.lastImpact > 0.15) {
+        bool held = false;
+        for (auto* p : players()) held |= p->heldProp == e->index;
+        // A sudden change in velocity that isn't someone carrying it = an impact.
+        if (change > 140.0f && !held && time_ - m.lastImpact > 0.15) {
             emitSound("Physics.WoodImpact", e.get(), e->origin, std::clamp(change / 500.0f, 0.2f, 1.0f));
             m.lastImpact = time_;
         }
@@ -449,7 +598,7 @@ void GameWorld::propImpactSounds() {
     }
 }
 
-void GameWorld::pushTouchedProps(const Vec3& playerVelocity) {
+void GameWorld::pushTouchedProps(Player& p, const Vec3& playerVelocity) {
     if (moveTouches_.empty()) return;
     std::sort(moveTouches_.begin(), moveTouches_.end());
     moveTouches_.erase(std::unique(moveTouches_.begin(), moveTouches_.end()), moveTouches_.end());
@@ -459,7 +608,7 @@ void GameWorld::pushTouchedProps(const Vec3& playerVelocity) {
     Vec3 dir = flat / speed;
     for (int idx : moveTouches_) {
         BaseEntity* e = entity(idx);
-        if (!e || !e->physicsDriven || idx == heldProp_) continue;
+        if (!e || !e->physicsDriven || idx == p.heldProp) continue;
         // Nudge the prop toward walking speed, more gently for heavy ones.
         float mass = std::max(1.0f, physics_->mass(e->physicsBody));
         Vec3 v = physics_->linearVelocity(e->physicsBody);
@@ -472,59 +621,71 @@ void GameWorld::pushTouchedProps(const Vec3& playerVelocity) {
     }
 }
 
-bool GameWorld::playerOverlaps(const BaseEntity& e, const Vec3& playerOrigin) const {
-    if (!player_ || !map_) return false;
-    if (!boxesOverlap(playerOrigin + player_->mins(), playerOrigin + player_->maxs(), e.absMins(), e.absMaxs())) return false;
+bool GameWorld::playerOverlaps(const Player& p, const BaseEntity& e, const Vec3& playerOrigin) const {
+    if (!map_) return false;
+    if (!boxesOverlap(playerOrigin + p.mins(), playerOrigin + p.maxs(), e.absMins(), e.absMaxs())) return false;
     if (e.brushModel <= 0) return true;
-    auto tr = bsp::traceBoxModel(*map_, e.brushModel, e.origin, playerOrigin, playerOrigin, player_->mins(),
-                                 player_->maxs(), bsp::CONTENTS_SOLID | bsp::CONTENTS_PLAYERCLIP);
+    auto tr = bsp::traceBoxModel(*map_, e.brushModel, e.origin, playerOrigin, playerOrigin, p.mins(), p.maxs(),
+                                 bsp::CONTENTS_SOLID | bsp::CONTENTS_PLAYERCLIP);
     return tr.startSolid;
 }
 
-void GameWorld::touchTriggers() {
+void GameWorld::touchTriggers(Player& p) {
     std::vector<int> now;
-    Vec3 pmin = player_->state.origin + player_->mins(), pmax = player_->state.origin + player_->maxs();
+    Vec3 pmin = p.state.origin + p.mins(), pmax = p.state.origin + p.maxs();
     for (auto& e : entities_) {
         if (!e || e->solid != Solid::Trigger) continue;
         if (boxesOverlap(pmin, pmax, e->absMins(), e->absMaxs())) now.push_back(e->index);
     }
     for (int idx : now)
-        if (std::find(touching_.begin(), touching_.end(), idx) == touching_.end())
-            if (auto* e = entity(idx)) e->startTouch(player_);
-    for (int idx : touching_)
+        if (std::find(p.touching.begin(), p.touching.end(), idx) == p.touching.end())
+            if (auto* e = entity(idx)) e->startTouch(&p);
+    for (int idx : p.touching)
         if (std::find(now.begin(), now.end(), idx) == now.end())
-            if (auto* e = entity(idx)) e->endTouch(player_);
-    touching_ = std::move(now);
+            if (auto* e = entity(idx)) e->endTouch(&p);
+    p.touching = std::move(now);
 }
 
 bool GameWorld::tryPush(BaseEntity& mover, const Vec3& delta) {
     Vec3 oldOrigin = mover.origin;
     mover.origin += delta;
-    if (!player_ || player_->state.moveType == MOVETYPE_NOCLIP || mover.solid != Solid::Bsp) return true;
+    if (mover.solid != Solid::Bsp) return true;
 
-    bool riding = player_->state.groundEntity == mover.index && (player_->state.flags & FL_ONGROUND);
-    bool hit = playerOverlaps(mover, player_->state.origin);
-    if (!riding && !hit) return true;
+    std::vector<std::pair<Player*, Vec3>> moved; // to undo if blocked
+    for (auto* p : players()) {
+        if (p->state.moveType == MOVETYPE_NOCLIP) continue;
+        bool riding = p->state.groundEntity == mover.index && (p->state.flags & FL_ONGROUND);
+        bool hit = playerOverlaps(*p, mover, p->state.origin);
+        if (!riding && !hit) continue;
 
-    // Move the player along with the pusher. Trace against everything except the mover.
-    Solid saved = mover.solid;
-    mover.solid = Solid::Not;
-    Vec3 from = player_->state.origin;
-    auto tr = traceBox(from, from + delta, player_->mins(), player_->maxs(), kPlayerMask);
-    mover.solid = saved;
-    if (!tr.startSolid && tr.fraction == 1.0f) {
-        player_->state.origin = tr.endPos;
-        player_->origin = tr.endPos;
-        if (!playerOverlaps(mover, player_->state.origin)) return true;
+        // Move the player along with the pusher. Trace against everything except the mover.
+        Solid saved = mover.solid;
+        mover.solid = Solid::Not;
+        Vec3 from = p->state.origin;
+        moving_ = p;
+        auto tr = traceBox(from, from + delta, p->mins(), p->maxs(), kPlayerMask);
+        moving_ = nullptr;
+        mover.solid = saved;
+        if (!tr.startSolid && tr.fraction == 1.0f) {
+            p->state.origin = tr.endPos;
+            p->origin = tr.endPos;
+            moved.emplace_back(p, from);
+            if (!playerOverlaps(*p, mover, p->state.origin)) continue;
+        }
+        // Couldn't carry this player all the way. If the mover still doesn't intersect them
+        // (e.g. a platform dropping away), leave them; otherwise the mover is blocked.
+        p->state.origin = from;
+        p->origin = from;
+        if (!playerOverlaps(*p, mover, from)) continue;
+        for (auto& [mp, origin] : moved) {
+            mp->state.origin = origin;
+            mp->origin = origin;
+        }
+        mover.origin = oldOrigin;
+        mover.blocked(p);
+        return false;
     }
-    // The player couldn't be carried all the way. Leave them where they were; if the mover
-    // still doesn't intersect them (e.g. a platform dropping away), let it move anyway.
-    player_->state.origin = from;
-    player_->origin = from;
-    if (!playerOverlaps(mover, from)) return true;
-    mover.origin = oldOrigin;
-    mover.blocked(player_);
-    return false;
+    return true;
 }
 
 void GameWorld::deliverInput(const std::string& target, const std::string& input, const std::string& param,
@@ -533,7 +694,7 @@ void GameWorld::deliverInput(const std::string& target, const std::string& input
     if (nameEquals(target, "!activator")) { if (activator) targets.push_back(activator); }
     else if (nameEquals(target, "!caller")) { if (caller) targets.push_back(caller); }
     else if (nameEquals(target, "!self")) { if (caller) targets.push_back(caller); }
-    else if (nameEquals(target, "!player")) { if (player_) targets.push_back(player_); }
+    else if (nameEquals(target, "!player")) { if (auto* p = player(0)) targets.push_back(p); else if (!players().empty()) targets.push_back(players()[0]); }
     else targets = findByName(target);
     if (targets.empty()) {
         log::warn("Entity I/O: no entity named '{}' for input '{}'", target, input);
@@ -548,19 +709,22 @@ void GameWorld::deliverInput(const std::string& target, const std::string& input
     }
 }
 
-void GameWorld::clientCommand(const std::string& text) {
+void GameWorld::clientCommand(int slot, const std::string& text) {
+    Player* p = player(slot);
+    if (!p) return;
     if (text == "noclip") {
         if (!console::cheatsAllowed()) {
             log::warn("Can't use noclip unless sv_cheats is 1");
             return;
         }
-        auto& s = player_->state;
+        auto& s = p->state;
         s.moveType = s.moveType == MOVETYPE_NOCLIP ? MOVETYPE_WALK : MOVETYPE_NOCLIP;
         s.velocity = Vec3(0);
-        log::info("noclip {}", s.moveType == MOVETYPE_NOCLIP ? "ON" : "OFF");
+        log::info("{}: noclip {}", p->name, s.moveType == MOVETYPE_NOCLIP ? "ON" : "OFF");
         return;
     }
     if (text.rfind("ent_fire ", 0) == 0) {
+        if (!console::cheatsAllowed()) return;
         // ent_fire <target> <input> [param]
         auto first = text.find(' ', 9);
         std::string target = text.substr(9, first == std::string::npos ? std::string::npos : first - 9);
@@ -568,18 +732,21 @@ void GameWorld::clientCommand(const std::string& text) {
         auto second = rest.find(' ');
         std::string input = rest.substr(0, second);
         std::string param = second == std::string::npos ? "" : rest.substr(second + 1);
-        if (target.empty() || input.empty()) {
-            log::info("Usage: ent_fire <target> <input> [param]");
-            return;
-        }
-        deliverInput(target, input, param, player_, player_);
+        if (target.empty() || input.empty()) return;
+        deliverInput(target, input, param, p, p);
+        return;
+    }
+    if (text.rfind("setpos ", 0) == 0) {
+        if (!console::cheatsAllowed()) return;
+        setPlayerOrigin(slot, parseVec3(text.substr(7)));
         return;
     }
     log::debug("Unknown client command '{}'", text);
 }
 
-void GameWorld::frame(float dt) {
+void GameWorld::frame(float dt, uint32_t tick) {
     time_ += dt;
+    tick_ = tick;
     // Physics: kinematic bodies follow their entities, then simulate, then props follow bodies.
     if (physics_) {
         for (auto& e : entities_)
@@ -589,7 +756,7 @@ void GameWorld::frame(float dt) {
             if (e && e->physicsDriven) physics_->getTransform(e->physicsBody, e->origin, e->angles);
         propImpactSounds();
     }
-    // Think functions. Copy the list: thinking can spawn or remove entities.
+    // Think functions. Index loop: thinking can spawn or remove entities.
     for (size_t i = 0; i < entities_.size(); ++i) {
         BaseEntity* e = entities_[i].get();
         if (!e || e->nextThink_ <= 0 || e->nextThink_ > time_) continue;
@@ -597,13 +764,16 @@ void GameWorld::frame(float dt) {
         e->think();
     }
     events_.service(*this);
-    for (auto& e : entities_)
-        if (e && e->markedForDeletion && e.get() != player_) {
-            std::erase(touching_, e->index);
-            if (e->physicsBody.valid() && physics_) physics_->removeBody(e->physicsBody);
-            if (heldProp_ == e->index) heldProp_ = -1;
-            e.reset();
+    for (auto& e : entities_) {
+        if (!e || !e->markedForDeletion || dynamic_cast<Player*>(e.get())) continue;
+        for (auto* p : players()) {
+            std::erase(p->touching, e->index);
+            if (p->heldProp == e->index) p->heldProp = -1;
         }
+        if (e->physicsBody.valid() && physics_) physics_->removeBody(e->physicsBody);
+        e.reset();
+    }
+    recordHistory(tick);
 }
 
 } // namespace k::game

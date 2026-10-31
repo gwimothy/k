@@ -85,8 +85,8 @@ public:
         TriggerMultiple::startTouch(other);
         if (!enabled_) return;
         auto* dest = world().findFirstByName(target_);
-        auto* p = world().player();
-        if (!dest || other != p) return;
+        auto* p = dynamic_cast<Player*>(other);
+        if (!dest || !p) return;
         p->state.origin = dest->origin;
         p->state.velocity = Vec3(0);
         p->state.viewAngles = dest->angles;

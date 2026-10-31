@@ -36,3 +36,4 @@
     }
 }
 "Ambient.Hum"       { "wave" "ambient/hum_loop.wav"   "volume" "0.35" "soundlevel" "65" "loop" "1" }
+"Player.Hit"        { "wave" "buttons/button1.wav"    "volume" "1.0" "pitch" "160" "soundlevel" "85" }

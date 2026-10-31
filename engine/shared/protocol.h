@@ -5,26 +5,33 @@
 #include "shared/kmath.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace k::proto {
 
-constexpr uint32_t kProtocolVersion = 5;
+constexpr uint32_t kProtocolVersion = 6;
+constexpr uint16_t kDefaultPort = 27015;
+constexpr int kMaxClients = 16;
 
 // Client -> server
 enum class Clc : uint8_t {
-    Connect = 1, // u32 protocol version, string name
-    Move = 2,    // u8 count, UserCmd[count]
-    StringCmd = 3,
+    Connect = 1,   // u32 protocol version, string name (loopback only; UDP uses the handshake)
+    Move = 2,      // u32 last snapshot tick received, u8 count, UserCmd[count] (newest last)
+    StringCmd = 3, // string
+    Disconnect = 4,
 };
 
 // Server -> client
 enum class Svc : uint8_t {
-    ServerInfo = 1,  // u32 protocol version, f32 tick interval, string map name, u16 n, string models[n]
-    Snapshot = 2,    // u32 server tick, u32 last acked command, PlayerState, u16 n, EntityState[n]
+    ServerInfo = 1,  // u32 protocol version, f32 tick interval, string map name, u16 n, string models[n],
+                     // u16 n, (string name, string value)[n] replicated cvars, u8 player slot
+    Snapshot = 2,    // u32 tick, u32 delta-from tick (0 = full), u32 last command, PlayerState, entity delta
     Print = 3,       // string
     SetAngle = 4,    // QAngle: force the client's view angles (spawn, teleport)
     CenterPrint = 5, // string shown in the middle of the screen
     Sound = 6,       // string name, u16 entity, Vec3 origin, f32 volume, u8 flags (1 = stop)
+    SetCvar = 7,     // string name, string value (replicated cvar changed)
+    Disconnect = 8,  // string reason
 };
 
 // State of the local player, sent every tick. Replaced by general entity snapshots in Phase 5.
@@ -86,5 +93,11 @@ struct EntityState {
         return s;
     }
 };
+
+// Entity lists sorted by index. The delta writes only entities that changed, appeared or
+// disappeared relative to `base`, with a mask of which fields changed.
+void writeEntityDelta(net::ByteWriter& w, const std::vector<EntityState>& base, const std::vector<EntityState>& current);
+// Rebuilds the current list from `base` and the delta. Returns false on malformed data.
+bool readEntityDelta(net::ByteReader& r, const std::vector<EntityState>& base, std::vector<EntityState>& out);
 
 } // namespace k::proto

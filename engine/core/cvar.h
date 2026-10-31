@@ -89,6 +89,8 @@ public:
     void setValue(float value);
     void setValue(int value);
     void revert() { setValue(std::string_view(default_)); }
+    // Set without the cheat check (replicated values from a server).
+    void forceValue(std::string_view value);
     void setChangeCallback(ChangeCallback cb) { onChange_ = std::move(cb); }
 
     std::optional<float> min() const { return min_; }

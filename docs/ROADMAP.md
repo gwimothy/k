@@ -81,13 +81,20 @@ Each phase ends in something you can run. Items are checked off as they land.
 - [ ] Soundscapes (DSP/reverb per area), occlusion
 - [ ] Physics constraints, ragdolls, breakables, prop damage
 
-## Phase 7 - Networking
+## Phase 7 - Networking ✅
 
-- [ ] UDP net channel with sequencing, acks and reliable/unreliable streams
-- [ ] Delta-compressed snapshots, bit-packed
-- [ ] Client-side prediction with correction, entity interpolation (`cl_interp`)
-- [ ] Lag compensation for hitscan
-- [ ] `connect <ip>`, `status`, multiple clients, `net_graph`
+- [x] UDP sockets (POSIX + Winsock) and a Quake-style net channel: sequencing, acks, one in-flight reliable block, unreliable messages, ping/loss/bandwidth stats, timeouts, `net_fakeloss`/`net_fakelag`
+- [x] Connectionless handshake (`connect`/`accept`/`reject`), passwords (`sv_password`), `sv_maxplayers`, `info` query
+- [x] Multiplayer server: up to 16 clients, listen servers (`map` + `sv_listen`, `hostport`) and dedicated servers
+- [x] Delta-compressed snapshots against each client's acknowledged baseline (field masks per entity)
+- [x] Replicated cvars (`FCVAR_REPLICATED`) sent on join and on change
+- [x] Client-side prediction with the shared movement code (including brush entities), error smoothing (`cl_smoothtime`), `cl_predict`, `cl_showerror`
+- [x] Entity interpolation buffer `cl_interp` seconds in the past with a slewed client clock
+- [x] Lag compensation: player position history, hitscan (`+attack`) rewinds targets to what the shooter saw (`sv_lagcompensation`)
+- [x] `connect <ip[:port]> [password]`, `disconnect`, `status`, `net_graph 1`; players block each other; placeholder player model
+- [x] Tests: reliability under 30% loss, sockets, delta round trips, in-process server + two UDP clients, prediction accuracy, password rejection, lag compensation; smoke test runs a dedicated server and a remote client as separate processes
+- [ ] Bit-packing / quantized origins and angles; fragmenting very large snapshots
+- [ ] Server browser / master server, NAT punch-through
 
 ## Phase 8 - Polish
 

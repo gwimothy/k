@@ -10,6 +10,19 @@ target_include_directories(k_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(k_core PUBLIC glm_headers)
 k_set_warnings(k_core)
 
+# k_net: UDP sockets, the network channel, and protocol encoding.
+add_library(k_net STATIC
+  net/socket.cpp
+  net/udp_channel.cpp
+  shared/protocol.cpp
+)
+target_include_directories(k_net PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(k_net PUBLIC k_core)
+if(WIN32)
+  target_link_libraries(k_net PUBLIC ws2_32)
+endif()
+k_set_warnings(k_net)
+
 # k_assets: asset code that needs no GPU (mesh building, glTF parsing). Tests link this.
 add_library(k_assets STATIC
   core/keyvalues.cpp
@@ -20,7 +33,7 @@ add_library(k_assets STATIC
   render/gltf_loader.cpp
 )
 target_include_directories(k_assets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(k_assets PUBLIC k_core PRIVATE cgltf_headers)
+target_link_libraries(k_assets PUBLIC k_core k_net PRIVATE cgltf_headers)
 k_set_warnings(k_assets)
 
 # k_audio: sound scripts and playback (miniaudio). No window or GPU needed.

@@ -111,6 +111,12 @@ void ConVar::setValue(std::string_view value) {
     if (onChange_) onChange_(*this, old);
 }
 
+void ConVar::forceValue(std::string_view value) {
+    std::string old = value_;
+    assign(std::string(value));
+    if (value_ != old && onChange_) onChange_(*this, old);
+}
+
 void ConVar::setValue(float value) { setValue(std::string_view(formatFloat(value))); }
 void ConVar::setValue(int value) { setValue(std::string_view(std::to_string(value))); }
 

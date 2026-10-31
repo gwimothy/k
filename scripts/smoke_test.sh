@@ -68,4 +68,23 @@ grep -qE "setpos 784.00 -816.00 20[0-9]\." <<<"$out" || { echo "FAIL: the elevat
 # Physics + sound: crates fall and clatter on map start, the door rumbles.
 grep -q "sound: Door.Move" <<<"$out" || { echo "FAIL: no door sound"; exit 1; }
 grep -q "sound: Ambient.Hum" <<<"$out" || { echo "FAIL: ambient_generic didn't play"; exit 1; }
+
+echo "== Multiplayer (dedicated server process + remote client process)"
+PORT=27555
+SRV_LOG="$BUILD_DIR/server_smoke.log"
+"$EXE" -dedicated +hostport $PORT +map devroom +sv_cheats 1 +host_maxticks 2000 >"$SRV_LOG" 2>&1 </dev/null &
+SRV_PID=$!
+trap 'kill $SRV_PID 2>/dev/null || true' EXIT
+sleep 1
+out=$("${RUNNER[@]}" "$EXE" -w 640 -h 480 -nosound +name smoke_remote +connect 127.0.0.1:$PORT \
+  +wait 120 ++forward +wait 40 +-forward +wait 30 +getpos +status +wait 5 +quit 2>&1)
+echo "$out" | grep -E "Connect|client:|setpos" || true
+kill $SRV_PID 2>/dev/null || true
+wait $SRV_PID 2>/dev/null || true
+grep -q "Connected to server" <<<"$out" || { echo "FAIL: remote client didn't connect"; cat "$SRV_LOG"; exit 1; }
+grep -q "client: remote on 'devroom'" <<<"$out" || { echo "FAIL: remote client status missing"; exit 1; }
+grep -qE "setpos (1[3-9][0-9]|2[0-9][0-9])\." <<<"$out" || { echo "FAIL: remote client didn't move (prediction/commands)"; exit 1; }
+grep -q "smoke_remote connected from 127.0.0.1" "$SRV_LOG" || { echo "FAIL: server didn't see the client"; cat "$SRV_LOG"; exit 1; }
+grep -q "smoke_remote left" "$SRV_LOG" || { echo "FAIL: server didn't see the client leave"; cat "$SRV_LOG"; exit 1; }
+
 echo "== All smoke tests passed ($count screenshots in $SHOTS)"
