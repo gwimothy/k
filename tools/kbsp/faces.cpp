@@ -162,6 +162,23 @@ void Compiler::assignLeafBrushes() {
 
 void Compiler::emitBsp() {
     bsp = {};
+    // Axial bevel planes for collision: box traces expand each brush plane by the box size,
+    // which only matches the true shape if every brush also has its six axis-aligned
+    // bounding planes (Quake 3 does the same). Boxes already have them; ramps don't.
+    std::vector<std::vector<int>> bevels(brushes.size());
+    for (size_t i = 0; i < brushes.size(); ++i) {
+        const Brush& b = brushes[i];
+        for (int axis = 0; axis < 3; ++axis)
+            for (int dir = -1; dir <= 1; dir += 2) {
+                dvec3 n(0);
+                n[axis] = dir;
+                double d = dir > 0 ? b.maxs[axis] : -b.mins[axis];
+                int p = findPlane(n, d);
+                bool has = false;
+                for (auto& s : b.sides) has |= s.plane == p;
+                if (!has) bevels[i].push_back(p);
+            }
+    }
     for (auto& p : planes) bsp.planes.push_back({k::Vec3(p.normal), static_cast<float>(p.dist)});
 
     // World faces first (model 0), then brush entities.
@@ -212,7 +229,8 @@ void Compiler::emitBsp() {
         ob.contents = b.contents;
         for (auto& s : b.sides)
             bsp.brushSides.push_back({s.plane, s.texInfo >= 0 ? texInfos[static_cast<size_t>(s.texInfo)].material : 0u});
-        ob.numSides = static_cast<uint32_t>(b.sides.size());
+        for (int p : bevels[static_cast<size_t>(&b - brushes.data())]) bsp.brushSides.push_back({p, 0u});
+        ob.numSides = static_cast<uint32_t>(bsp.brushSides.size()) - ob.firstSide;
         bsp.brushes.push_back(ob);
     }
     bsp.materials = materials;

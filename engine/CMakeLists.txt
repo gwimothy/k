@@ -5,7 +5,6 @@ add_library(k_core STATIC
   core/cmdbuffer.cpp
   core/filesystem.cpp
   core/png.cpp
-  shared/movement.cpp
 )
 target_include_directories(k_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(k_core PUBLIC glm_headers)
@@ -16,6 +15,7 @@ add_library(k_assets STATIC
   core/keyvalues.cpp
   shared/bspfile.cpp
   shared/bsp_trace.cpp
+  shared/gamemovement.cpp
   render/mesh_data.cpp
   render/gltf_loader.cpp
 )

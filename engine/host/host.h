@@ -45,6 +45,7 @@ public:
     void setPos(const Vec3& origin);
     void setAng(const QAngle& angles);
     void printPos();
+    void forwardToServer(const std::string& text);
 
     static Host* instance() { return instance_; }
 

@@ -2,7 +2,9 @@
 
 #include "core/cvar.h"
 #include "core/log.h"
-#include "shared/movement.h"
+
+#include <cmath>
+#include "shared/gamemovement.h"
 
 namespace k {
 namespace {
@@ -12,6 +14,11 @@ ConVar sv_cheats("sv_cheats", "0", FCVAR_NOTIFY | FCVAR_REPLICATED, "Allow cheat
 ConVar sv_maxspeed("sv_maxspeed", "320", FCVAR_REPLICATED | FCVAR_NOTIFY, "Maximum player speed.");
 ConVar sv_friction("sv_friction", "4", FCVAR_REPLICATED | FCVAR_NOTIFY, "World friction.");
 ConVar sv_stopspeed("sv_stopspeed", "100", FCVAR_REPLICATED | FCVAR_NOTIFY, "Minimum stopping speed on ground.");
+ConVar sv_accelerate("sv_accelerate", "10", FCVAR_REPLICATED | FCVAR_NOTIFY, "Ground acceleration.");
+ConVar sv_airaccelerate("sv_airaccelerate", "10", FCVAR_REPLICATED | FCVAR_NOTIFY, "Air acceleration.");
+ConVar sv_gravity("sv_gravity", "800", FCVAR_REPLICATED | FCVAR_NOTIFY, "World gravity.");
+ConVar sv_stepsize("sv_stepsize", "18", FCVAR_REPLICATED | FCVAR_NOTIFY, "Maximum step-up height.");
+ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "Holding jump re-jumps on landing.");
 ConVar sv_noclipspeed("sv_noclipspeed", "5", FCVAR_ARCHIVE | FCVAR_NOTIFY, "Noclip speed multiplier.");
 ConVar sv_noclipaccelerate("sv_noclipaccelerate", "5", FCVAR_ARCHIVE | FCVAR_NOTIFY, "Noclip acceleration.");
 
@@ -103,7 +110,7 @@ void Server::readMessages() {
                     break;
                 }
                 case proto::Clc::StringCmd: {
-                    log::debug("client stringcmd: {}", r.readString());
+                    handleStringCmd(r.readString());
                     break;
                 }
                 default:
@@ -118,12 +125,31 @@ void Server::processUserCmd(const UserCmd& cmd) {
     lastCommandNumber_ = cmd.commandNumber;
     MoveParams params;
     params.maxSpeed = sv_maxspeed.getFloat();
+    params.accelerate = sv_accelerate.getFloat();
+    params.airAccelerate = sv_airaccelerate.getFloat();
     params.friction = sv_friction.getFloat();
     params.stopSpeed = sv_stopspeed.getFloat();
+    params.gravity = sv_gravity.getFloat();
+    params.stepSize = sv_stepsize.getFloat();
+    params.jumpImpulse = std::sqrt(2.0f * params.gravity * 57.0f);
+    params.autoBunnyhop = sv_autobunnyhopping.getBool();
     params.noclipSpeed = sv_noclipspeed.getFloat();
     params.noclipAccelerate = sv_noclipaccelerate.getFloat();
-    // Noclip flying is all we have until world collision exists (Phase 4).
-    playerMoveNoclip(player_, cmd, tickInterval_, params);
+    playerMove(player_, cmd, tickInterval_, params, map_.get());
+}
+
+void Server::handleStringCmd(const std::string& text) {
+    if (text == "noclip") {
+        if (!sv_cheats.getBool()) {
+            log::warn("Can't use noclip unless sv_cheats is 1");
+            return;
+        }
+        player_.moveType = player_.moveType == MOVETYPE_NOCLIP ? MOVETYPE_WALK : MOVETYPE_NOCLIP;
+        player_.velocity = Vec3(0);
+        log::info("noclip {}", player_.moveType == MOVETYPE_NOCLIP ? "ON" : "OFF");
+        return;
+    }
+    log::debug("Unknown client command '{}'", text);
 }
 
 void Server::sendSnapshot() {

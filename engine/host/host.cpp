@@ -117,6 +117,12 @@ ConCommand cmd_getpos(
         if (host()) host()->printPos();
     },
     "Print setpos/setang commands for the current position.");
+ConCommand cmd_noclip(
+    "noclip",
+    [](const CmdArgs&) {
+        if (host()) host()->forwardToServer("noclip");
+    },
+    "Toggle flying through walls (needs sv_cheats 1).");
 ConVar crosshair("crosshair", "1", FCVAR_ARCHIVE, "Draw a crosshair.");
 
 // Non-blocking stdin for the dedicated server console. Deliberately avoids C stdio /
@@ -464,7 +470,8 @@ void Host::drawOverlay() {
             if (auto* ws = renderer_->worldStats())
                 ImGui::Text("leaf %d: %zu leaves, %zu faces visible", ws->cameraLeaf, ws->visibleLeaves, ws->visibleFaces);
             ImGui::Text("ang: %.1f %.1f %.1f", v.angles.pitch, v.angles.yaw, v.angles.roll);
-            ImGui::Text("vel: %.1f", glm::length(p.velocity));
+            ImGui::Text("vel: %.1f (horizontal %.1f)%s", glm::length(p.velocity),
+                        glm::length(Vec2(p.velocity.x, p.velocity.y)), (p.flags & 1u) ? " ground" : "");
             ImGui::Text("tick: %u", client_.serverTick());
         }
     }
@@ -524,6 +531,14 @@ void Host::setPos(const Vec3& origin) {
 }
 
 void Host::setAng(const QAngle& angles) { client_.setViewAngles(angles); }
+
+void Host::forwardToServer(const std::string& text) {
+    if (!client_.connected()) {
+        log::warn("Not connected to a server");
+        return;
+    }
+    client_.sendStringCmd(text);
+}
 
 void Host::printPos() {
     const auto& p = server_.player();

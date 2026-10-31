@@ -9,6 +9,7 @@ add_executable(k_tests
   test_keyvalues.cpp
   test_assets.cpp
   test_bsp.cpp
+  test_movement.cpp
 )
 target_link_libraries(k_tests PRIVATE k_assets kbsp_lib doctest_headers)
 target_compile_definitions(k_tests PRIVATE K_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

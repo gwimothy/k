@@ -8,7 +8,7 @@
 
 namespace k::proto {
 
-constexpr uint32_t kProtocolVersion = 2;
+constexpr uint32_t kProtocolVersion = 3;
 
 // Client -> server
 enum class Clc : uint8_t {
@@ -31,12 +31,18 @@ struct PlayerState {
     Vec3 velocity{0};
     QAngle viewAngles;
     float viewHeight = 64.0f;
+    uint32_t flags = 0;      // PlayerFlags
+    uint32_t moveType = 0;   // MoveType
+    uint32_t oldButtons = 0; // buttons from the previous command (jump needs a fresh press)
 
     void write(net::ByteWriter& w) const {
         w.write(origin);
         w.write(velocity);
         w.write(viewAngles);
         w.write(viewHeight);
+        w.write(flags);
+        w.write(moveType);
+        w.write(oldButtons);
     }
     static PlayerState read(net::ByteReader& r) {
         PlayerState s;
@@ -44,6 +50,9 @@ struct PlayerState {
         s.velocity = r.read<Vec3>();
         s.viewAngles = r.read<QAngle>();
         s.viewHeight = r.read<float>();
+        s.flags = r.read<uint32_t>();
+        s.moveType = r.read<uint32_t>();
+        s.oldButtons = r.read<uint32_t>();
         return s;
     }
 };

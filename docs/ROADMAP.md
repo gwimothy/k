@@ -49,12 +49,14 @@ Each phase ends in something you can run. Items are checked off as they land.
 - [ ] Radiosity bounces, `light_spot`, ambient samples for props
 - [ ] T-junction fixing and coplanar face merging
 
-## Phase 4 - Movement and collision
+## Phase 4 - Movement and collision ✅
 
-- [ ] Brush collision: trace boxes through the BSP (`TraceHull`)
-- [ ] Source-style player movement: ground/air acceleration, friction, air strafing, step-up, crouch/uncrouch, jumping, ladders later
-- [ ] `noclip` command (cheat), `sv_gravity`, `sv_accelerate`, `sv_airaccelerate`
-- [ ] Movement shared between server and client (ready for prediction)
+- [x] Box traces against brushes through the BSP (Quake 3 style, with axial bevel planes from the compiler)
+- [x] Source-style player movement: ground/air acceleration, friction, gravity, air strafing, step-up (18), stay-on-ground for stairs and slopes, crouch (with in-air leg tuck and stand-up check), jumping (57 units)
+- [x] `noclip` (cheat), `sv_gravity`, `sv_accelerate`, `sv_airaccelerate`, `sv_friction`, `sv_stepsize`, `sv_autobunnyhopping`
+- [x] Movement is a pure shared function (`shared/gamemovement`), ready for client prediction
+- [x] Tests: landing, max speed, walls, sliding, jump height, steps vs blocks, crouch, air strafing, noclip, box traces
+- [ ] Ladders, water, edge bevels for non-axial brush edges
 
 ## Phase 5 - Entities and game module
 

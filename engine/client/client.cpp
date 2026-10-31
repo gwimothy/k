@@ -133,6 +133,14 @@ void Client::createMove(float /*tickInterval*/) {
     channel_->send(w.data());
 }
 
+void Client::sendStringCmd(const std::string& text) {
+    if (!channel_) return;
+    net::ByteWriter w;
+    w.write(proto::Clc::StringCmd);
+    w.writeString(text);
+    channel_->send(w.data());
+}
+
 void Client::readPackets() {
     if (!channel_) return;
     while (auto msg = channel_->receive()) {

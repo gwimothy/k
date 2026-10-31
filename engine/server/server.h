@@ -37,6 +37,7 @@ private:
     void processUserCmd(const UserCmd& cmd);
     void sendSnapshot();
     void spawnPlayer();
+    void handleStringCmd(const std::string& text);
 
     bool active_ = false;
     std::string mapName_;

@@ -1,5 +1,5 @@
 #include "shared/kmath.h"
-#include "shared/movement.h"
+#include "shared/gamemovement.h"
 
 #include <doctest/doctest.h>
 

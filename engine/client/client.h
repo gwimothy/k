@@ -33,6 +33,9 @@ public:
     // Per server tick: build a UserCmd from current input and send it.
     void createMove(float tickInterval);
 
+    // Send a command string for the server to run (e.g. "noclip").
+    void sendStringCmd(const std::string& text);
+
     // Drain messages from the server.
     void readPackets();
 
