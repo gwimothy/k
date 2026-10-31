@@ -81,6 +81,27 @@ bool Server::start(std::string mapName, std::shared_ptr<const bsp::BspData> map,
         w.write(static_cast<uint8_t>(stop ? 1 : 0));
         broadcastReliable(w);
     };
+    services.tempEntity = [this](uint8_t type, const Vec3& pos, const Vec3& normal) {
+        net::ByteWriter w;
+        w.write(proto::Svc::TempEntity);
+        w.write(type);
+        w.write(pos);
+        w.write(normal);
+        broadcastReliable(w);
+    };
+    services.killFeed = [this](const std::string& attacker, const std::string& victim, const std::string& how) {
+        net::ByteWriter w;
+        w.write(proto::Svc::KillFeed);
+        w.writeString(attacker);
+        w.writeString(victim);
+        w.writeString(how);
+        broadcastReliable(w);
+    };
+    services.hitConfirm = [this](int slot) {
+        net::ByteWriter w;
+        w.write(proto::Svc::HitConfirm);
+        sendReliableTo(slot, w);
+    };
     game_ = game::createGameServer(std::move(services));
     if (!game_->levelInit(mapName_, map_)) {
         log::error("Game failed to load '{}'", mapName_);

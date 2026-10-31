@@ -126,7 +126,7 @@ bool Renderer::init(Window& window) {
 
     // Compile everything up front so errors show at startup.
     bool ok = true;
-    for (const char* name : {"lit_generic", "unlit_generic", "lightmapped_generic", "sky", "debug_line", "postprocess"})
+    for (const char* name : {"lit_generic", "unlit_generic", "lightmapped_generic", "sky", "debug_line", "postprocess", "particle"})
         ok &= shaders_.get(name) != nullptr;
     if (!ok) log::error("Some shaders failed to compile; see above");
     return shaders_.get("lit_generic") && shaders_.get("postprocess");
@@ -186,6 +186,7 @@ void Renderer::loadMap(std::shared_ptr<const bsp::BspData> bsp) {
 
 void Renderer::unloadMap() {
     world_.reset();
+    effects_.clear();
     props_.clear();
     sky_ = nullptr;
 }
@@ -292,6 +293,9 @@ void Renderer::renderView(const ViewSetup& view, const std::vector<RenderEntity>
     // Sky fills whatever is left (drawn at the far plane).
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     if (sky_ && r_drawsky.getBool()) drawSky(proj * Mat4(glm::mat3(viewMat)));
+
+    // Decals and particles.
+    effects_.draw(viewProj_, right, up, shaders_);
 
     // Translucent (unsorted for now; sorted back-to-front once entities exist)
     glEnable(GL_BLEND);

@@ -101,6 +101,8 @@ ConCommand cmd_connect(
     "Join a server.");
 ConCommand cmd_status("status", [](const CmdArgs&) { if (host()) host()->printStatus(); }, "Show the server and connection status.");
 ConCommand cmd_disconnect("disconnect", [](const CmdArgs&) { if (host()) host()->disconnect(); }, "Leave the current game.");
+ConCommand cmd_menu("menu", [](const CmdArgs&) { if (host()) host()->toggleMenu(); }, "Show/hide the main menu.");
+ConVar hud_draw("hud_draw", "1", FCVAR_ARCHIVE, "Draw the HUD.");
 ConCommand cmd_toggleconsole("toggleconsole", [](const CmdArgs&) { if (host()) host()->toggleConsole(); }, "Show/hide the console.");
 ConCommand cmd_screenshot("screenshot", [](const CmdArgs&) { if (host()) host()->screenshot(); }, "Save a PNG screenshot to screenshots/.");
 ConCommand cmd_writeconfig("host_writeconfig", [](const CmdArgs&) { if (host()) host()->writeConfig(); }, "Save binds and archived cvars to cfg/config.cfg.");
@@ -152,6 +154,7 @@ ConCommand cmd_play(
         if (host()) host()->playSound(a.arg(1));
     },
     "Play a sound script at your position.");
+ConCommand cmd_kill("kill", [](const CmdArgs&) { if (host()) host()->forwardToServer("kill"); }, "Kill yourself (respawn).");
 ConCommand cmd_noclip(
     "noclip",
     [](const CmdArgs&) {
@@ -261,6 +264,14 @@ int Host::run(const std::vector<std::string>& args) {
     }
     fs::addSearchPath(gameRoot, "MOD");
     fs::addSearchPath(gameRoot, "GAME");
+    // Archives after the loose files, so loose files override them (handy for modding).
+    std::vector<std::filesystem::path> paks;
+    std::error_code pakErr;
+    for (auto& entry : std::filesystem::directory_iterator(gameRoot, pakErr))
+        if (entry.path().extension() == ".kpk") paks.push_back(entry.path());
+    std::sort(paks.begin(), paks.end());
+    for (auto& p : paks)
+        if (fs::addArchive(p, "GAME")) log::info("Mounted {}", p.filename().string());
     log::info("k engine - game dir: {}", gameRoot.string());
 
     if (!opts_.dedicated && !initClient(opts_)) return 1;
@@ -349,6 +360,7 @@ void Host::shutdownClient() {
 }
 
 void Host::frame(double frameTime) {
+    lastFrameTime_ = frameTime;
     if (window_) pumpEvents();
     if (opts_.dedicated) stdinReader().flushInto();
     cmd::execute();
@@ -419,8 +431,9 @@ void Host::pumpEvents() {
         if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
             if (e.key.scancode == SDL_SCANCODE_GRAVE || e.key.scancode == SDL_SCANCODE_ESCAPE) {
                 if (e.key.scancode == SDL_SCANCODE_ESCAPE) {
-                    // Escape is reserved (no menu yet): it always toggles the console.
-                    toggleConsole();
+                    // Escape closes the console if it's open, otherwise toggles the menu.
+                    if (consoleOpen) toggleConsole();
+                    else toggleMenu();
                 } else {
                     // ` goes through the bind system so it can be rebound; default.cfg binds it.
                     bool down = true;
@@ -450,7 +463,7 @@ void Host::pumpEvents() {
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                if (!consoleOpen && e.wheel.y != 0) {
+                if (!consoleOpen && !menuOpen_ && e.wheel.y != 0) {
                     const char* key = e.wheel.y > 0 ? "mwheelup" : "mwheeldown";
                     bindings::onKey(key, true);
                     bindings::onKey(key, false);
@@ -464,7 +477,7 @@ void Host::pumpEvents() {
                 auto key = keys::fromEvent(e, down);
                 if (key.empty()) break;
                 // Releases always go through so held buttons don't get stuck when the console opens.
-                if (!consoleOpen || !down) bindings::onKey(key, down);
+                if ((!consoleOpen && !menuOpen_) || !down) bindings::onKey(key, down);
                 break;
             }
             default: break;
@@ -474,7 +487,7 @@ void Host::pumpEvents() {
 }
 
 void Host::updateMouseCapture() {
-    bool want = windowFocused_ && !(console_ && console_->open()) && client_.active();
+    bool want = windowFocused_ && !(console_ && console_->open()) && !menuOpen_ && client_.active();
     if (want != window_->relativeMouse()) window_->setRelativeMouse(want);
 }
 
@@ -483,6 +496,8 @@ void Host::renderFrame(float alpha) {
     if (client_.active()) {
         client_.renderEntities(frameEntities_);
         ViewSetup view = client_.view(alpha);
+        for (auto& te : client_.takeTempEntities()) renderer_->effects().spawn(te.type, te.position, te.normal);
+        renderer_->effects().update(static_cast<float>(lastFrameTime_));
         renderer_->renderView(view, frameEntities_);
         if (audio_) {
             for (auto& ev : client_.takeSounds()) {
@@ -498,13 +513,159 @@ void Host::renderFrame(float alpha) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    drawHud();
     drawOverlay();
+    if (menuOpen_ || (!client_.active() && !client_.connected() && client_.state() != Client::State::Connecting && hostFrames_ > 30))
+        drawMenu();
     if (console_) console_->draw();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     renderer_->endFrame();
     window_->swap();
+}
+
+void Host::setMenuOpen(bool open) {
+    menuOpen_ = open;
+    menuPage_ = 0;
+    if (open) {
+        bindings::releaseAll();
+        std::snprintf(nameBuffer_, sizeof(nameBuffer_), "%s", player_name.getString().c_str());
+    }
+}
+
+void Host::drawHud() {
+    if (!hud_draw.getBool() || !client_.active()) return;
+    ImGuiIO& io = ImGui::GetIO();
+    auto* dl = ImGui::GetForegroundDrawList();
+    const auto& state = client_.latestState();
+    double now = platformTime();
+    float big = ImGui::GetFontSize() * 2.4f;
+
+    if (state.health < lastHealth_ && !state.dead) damageFlashTime_ = now;
+    lastHealth_ = state.health;
+
+    // Damage flash: a red vignette that fades out.
+    float flash = static_cast<float>(1.0 - (now - damageFlashTime_) / 0.5);
+    if (flash > 0) {
+        ImU32 red = IM_COL32(200, 0, 0, static_cast<int>(110 * flash)), clear = IM_COL32(200, 0, 0, 0);
+        float w = io.DisplaySize.x, h = io.DisplaySize.y, b = h * 0.18f;
+        dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(w, b), red, red, clear, clear);
+        dl->AddRectFilledMultiColor(ImVec2(0, h - b), ImVec2(w, h), clear, clear, red, red);
+    }
+
+    if (state.dead) {
+        dl->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(60, 0, 0, 120));
+        const char* text = "You died. Respawning...";
+        ImVec2 size = ImGui::CalcTextSize(text);
+        dl->AddText(ImGui::GetFont(), big * 0.8f, ImVec2(io.DisplaySize.x * 0.5f - size.x * 0.96f, io.DisplaySize.y * 0.4f),
+                    IM_COL32(255, 220, 200, 255), text);
+    } else {
+        // Health, bottom left.
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "+ %d", state.health);
+        float t = std::clamp(state.health / 100.0f, 0.0f, 1.0f);
+        ImU32 col = IM_COL32(static_cast<int>(255 * (1 - t) + 120 * t), static_cast<int>(70 + 160 * t), 70, 230);
+        ImVec2 pos(28, io.DisplaySize.y - big - 24);
+        dl->AddRectFilled(ImVec2(pos.x - 12, pos.y - 6), ImVec2(pos.x + big * 2.6f, pos.y + big + 6), IM_COL32(0, 0, 0, 90), 6.0f);
+        dl->AddText(ImGui::GetFont(), big, pos, col, buf);
+    }
+
+    // Hit marker: a quick X around the crosshair.
+    if (now - client_.lastHitConfirm() < 0.15) {
+        ImVec2 c(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
+        ImU32 white = IM_COL32(255, 255, 255, 230);
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+                dl->AddLine(ImVec2(c.x + sx * 6, c.y + sy * 6), ImVec2(c.x + sx * 13, c.y + sy * 13), white, 2.0f);
+    }
+
+    // Kill feed, top right under the debug overlay.
+    float y = io.DisplaySize.y * 0.25f;
+    for (auto& k : client_.killFeed()) {
+        if (now - k.time > 6.0) continue;
+        std::string line = k.attacker.empty() ? k.victim + " (" + k.how + ")" : k.attacker + "  >  " + k.victim;
+        ImVec2 size = ImGui::CalcTextSize(line.c_str());
+        ImVec2 p(io.DisplaySize.x - size.x - 24, y);
+        dl->AddRectFilled(ImVec2(p.x - 8, p.y - 3), ImVec2(p.x + size.x + 8, p.y + size.y + 3), IM_COL32(0, 0, 0, 120), 4.0f);
+        dl->AddText(p, IM_COL32(255, 240, 210, 255), line.c_str());
+        y += size.y + 10;
+    }
+}
+
+void Host::drawMenu() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (!client_.active()) ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(18, 22, 30, 255));
+    else ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 120));
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(420, 0));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin("k", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+    ImVec2 full(-1, 0);
+    auto back = [&] {
+        ImGui::Separator();
+        if (ImGui::Button("Back", full)) menuPage_ = 0;
+    };
+    switch (menuPage_) {
+        case 0:
+            if (client_.active() && ImGui::Button("Resume", full)) setMenuOpen(false);
+            if (ImGui::Button("New game", full)) menuPage_ = 1;
+            if (ImGui::Button("Join game", full)) menuPage_ = 2;
+            if (ImGui::Button("Options", full)) menuPage_ = 3;
+            if (client_.connected() && ImGui::Button("Disconnect", full)) disconnect();
+            if (ImGui::Button("Quit", full)) quit();
+            if (!client_.disconnectReason().empty() && !client_.connected())
+                ImGui::TextWrapped("Last disconnect: %s", client_.disconnectReason().c_str());
+            break;
+        case 1: {
+            ImGui::TextUnformatted("Maps");
+            for (auto& m : completeMapName("")) {
+                if (ImGui::Button(m.c_str(), full)) {
+                    setMenuOpen(false);
+                    cmd::append("map " + m);
+                }
+            }
+            back();
+            break;
+        }
+        case 2:
+            ImGui::InputText("Address", joinAddress_, sizeof(joinAddress_));
+            if (ImGui::Button("Connect", full)) {
+                setMenuOpen(false);
+                cmd::append(std::string("connect ") + joinAddress_);
+            }
+            back();
+            break;
+        case 3: {
+            auto slider = [](const char* label, const char* cvar, float mn, float mx) {
+                if (auto* v = console::findVar(cvar)) {
+                    float f = v->getFloat();
+                    if (ImGui::SliderFloat(label, &f, mn, mx)) v->setValue(f);
+                }
+            };
+            auto check = [](const char* label, const char* cvar) {
+                if (auto* v = console::findVar(cvar)) {
+                    bool b = v->getBool();
+                    if (ImGui::Checkbox(label, &b)) v->setValue(b ? 1 : 0);
+                }
+            };
+            if (ImGui::InputText("Name", nameBuffer_, sizeof(nameBuffer_))) player_name.setValue(std::string_view(nameBuffer_));
+            slider("Mouse sensitivity", "sensitivity", 0.1f, 10.0f);
+            slider("Field of view", "fov_desired", 75.0f, 110.0f);
+            slider("Volume", "volume", 0.0f, 1.0f);
+            check("Vertical sync", "mat_vsync");
+            check("Show FPS", "cl_showfps");
+            check("Network graph", "net_graph");
+            back();
+            break;
+        }
+        default: menuPage_ = 0;
+    }
+    ImGui::End();
 }
 
 void Host::drawOverlay() {

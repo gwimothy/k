@@ -23,6 +23,10 @@ struct EngineServices {
     std::function<void(int slot, const std::string&)> centerPrintTo;
     // Play (or stop) a sound script on the client. entity > 0 attaches it to that entity.
     std::function<void(const std::string& name, int entity, const Vec3& origin, float volume, bool stop)> emitSound;
+    // Visual effects and HUD events.
+    std::function<void(uint8_t type, const Vec3& position, const Vec3& normal)> tempEntity;
+    std::function<void(const std::string& attacker, const std::string& victim, const std::string& how)> killFeed;
+    std::function<void(int slot)> hitConfirm;
 };
 
 class IGameServer {

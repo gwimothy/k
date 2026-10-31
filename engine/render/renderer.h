@@ -12,6 +12,7 @@
 #include "render/render_target.h"
 #include "render/shader_library.h"
 #include "render/texture.h"
+#include "render/effects.h"
 #include "render/world_renderer.h"
 #include "shared/bspfile.h"
 
@@ -62,6 +63,7 @@ public:
     TextureManager& textures() { return textures_; }
     MaterialSystem& materials() { return materials_; }
     ModelManager& models() { return models_; }
+    Effects& effects() { return effects_; }
 
 private:
     void ensureTargets();
@@ -77,6 +79,7 @@ private:
     ShaderLibrary shaders_;
 
     std::unique_ptr<WorldRenderer> world_;
+    Effects effects_;
     std::vector<StaticProp> props_;
     // Prop lighting from the map's light_environment (until per-leaf ambient samples exist).
     Vec3 sunDir_{0.35f, 0.25f, 0.9f}, sunColor_{1.9f, 1.75f, 1.5f};

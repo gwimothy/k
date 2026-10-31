@@ -23,6 +23,9 @@ ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_
 ConVar sv_noclipspeed("sv_noclipspeed", "5", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Noclip speed multiplier.");
 ConVar sv_noclipaccelerate("sv_noclipaccelerate", "5", FCVAR_ARCHIVE | FCVAR_REPLICATED, "Noclip acceleration.");
 ConVar sv_lagcompensation("sv_lagcompensation", "1", FCVAR_NONE, "Rewind players to what the shooter saw.");
+ConVar sv_hitscan_damage("sv_hitscan_damage", "25", FCVAR_NOTIFY, "Damage per hitscan hit.", 0.0f, 1000.0f);
+ConVar sv_falldamage("sv_falldamage", "1", FCVAR_NOTIFY, "Players take damage from long falls.");
+ConVar sv_respawntime("sv_respawntime", "3", FCVAR_NOTIFY, "Seconds before a dead player respawns.", 0.0f, 60.0f);
 ConVar developer_io("developer_io", "0", FCVAR_NONE, "Log every entity I/O event as it fires.");
 
 constexpr float kUseDistance = 72.0f;
@@ -348,7 +351,7 @@ bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const V
             if (consider(sweepBox(start, end, mins, maxs, e->absMins(), e->absMaxs(), normal), normal, e->index))
                 moveTouches_.push_back(e->index);
         } else if (auto* p = dynamic_cast<const Player*>(e.get())) {
-            if (p->state.moveType == MOVETYPE_NOCLIP || (moving_ && moving_->state.moveType == MOVETYPE_NOCLIP)) continue;
+            if (p->state.dead || p->state.moveType == MOVETYPE_NOCLIP || (moving_ && moving_->state.moveType == MOVETYPE_NOCLIP)) continue;
             consider(sweepBox(start, end, mins, maxs, p->state.origin + p->mins(), p->state.origin + p->maxs(), normal),
                      normal, e->index);
         }
@@ -374,9 +377,50 @@ bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const V
     return best;
 }
 
+void GameWorld::damagePlayer(Player& victim, int amount, Player* attacker, const std::string& how) {
+    if (victim.state.dead || amount <= 0) return;
+    if (victim.state.moveType == MOVETYPE_NOCLIP && !attacker) return; // noclip ignores the world
+    victim.state.health = static_cast<int16_t>(std::max(0, victim.state.health - amount));
+    if (victim.state.health > 0) {
+        emitSound("Player.Pain", &victim, victim.origin);
+        return;
+    }
+    victim.state.dead = 1;
+    victim.state.velocity = Vec3(0);
+    victim.state.flags &= ~FL_DUCKING;
+    victim.effects |= EF_NODRAW;
+    victim.heldProp = -1;
+    victim.respawnTime = time_ + sv_respawntime.getFloat();
+    emitSound("Player.Death", nullptr, victim.origin);
+    std::string killer = attacker && attacker != &victim ? attacker->name : "";
+    log::info("{} {} {}", killer.empty() ? victim.name : killer, killer.empty() ? "died" : "killed", killer.empty() ? "(" + how + ")" : victim.name);
+    if (services_.killFeed) services_.killFeed(killer, victim.name, how);
+}
+
+void GameWorld::respawn(Player& p) {
+    p.state = proto::PlayerState{};
+    Vec3 offset(0);
+    int n = static_cast<int>(players().size());
+    if (n > 1) offset = Vec3(std::cos(p.slot * 1.3f), std::sin(p.slot * 1.3f), 0) * 48.0f;
+    p.state.origin = spawnOrigin_ + offset;
+    p.state.viewAngles = spawnAngles_;
+    p.origin = p.state.origin;
+    p.effects &= ~EF_NODRAW;
+    p.teleported = true; // snap the client's view to the spawn angles
+    for (int t : p.touching)
+        if (auto* e = entity(t)) e->endTouch(&p);
+    p.touching.clear();
+}
+
 void GameWorld::runCommand(int slot, const UserCmd& cmd, float dt) {
     Player* p = player(slot);
     if (!p) return;
+    if (p->state.dead) {
+        // Dead: no movement. Respawn when the timer runs out (or on +jump/+attack after it).
+        if (time_ >= p->respawnTime) respawn(*p);
+        p->lastButtons = cmd.buttons;
+        return;
+    }
     MoveParams params;
     params.maxSpeed = sv_maxspeed.getFloat();
     params.accelerate = sv_accelerate.getFloat();
@@ -400,6 +444,12 @@ void GameWorld::runCommand(int slot, const UserCmd& cmd, float dt) {
     p->angles = p->state.viewAngles;
     pushTouchedProps(*p, velocityBefore);
     playerSounds(*p, stateBefore, dt);
+    // Fall damage, Source's formula: safe below ~526 u/s, fatal around 922 u/s.
+    bool landed = !(stateBefore.flags & FL_ONGROUND) && (p->state.flags & FL_ONGROUND);
+    if (landed && sv_falldamage.getBool() && p->state.moveType != MOVETYPE_NOCLIP && stateBefore.velocity.z < -526.5f) {
+        float speed = -stateBefore.velocity.z;
+        damagePlayer(*p, static_cast<int>((speed - 526.5f) * (100.0f / (922.5f - 526.5f))), nullptr, "fell");
+    }
 
     bool usePressed = (cmd.buttons & IN_USE) && !(p->lastButtons & IN_USE);
     bool attackPressed = (cmd.buttons & IN_ATTACK) && !(p->lastButtons & IN_ATTACK);
@@ -407,10 +457,11 @@ void GameWorld::runCommand(int slot, const UserCmd& cmd, float dt) {
     if (attackPressed && p->heldProp < 0) {
         Vec3 hit;
         int what = fireHitscan(*p, cmd.tickCount, &hit);
+        emitSound("Weapon.Fire", p, p->origin);
         if (auto* target = dynamic_cast<Player*>(entity(what))) {
-            log::info("{} hit {}", p->name, target->name);
-            if (services_.centerPrintTo) services_.centerPrintTo(p->slot, "Hit " + target->name + "!");
             emitSound("Player.Hit", target, target->origin);
+            if (services_.hitConfirm) services_.hitConfirm(p->slot);
+            damagePlayer(*target, sv_hitscan_damage.getInt(), p, "hitscan");
         }
     }
     updateHeldProp(*p, cmd, dt);
@@ -448,7 +499,7 @@ int GameWorld::fireHitscan(Player& shooter, uint32_t viewTick, Vec3* hitPos) {
             if (it->tick <= viewTick) { frame = &*it; break; }
 
     for (auto* target : players()) {
-        if (target == &shooter) continue;
+        if (target == &shooter || target->state.dead) continue;
         Vec3 origin = target->state.origin;
         bool ducking = (target->state.flags & FL_DUCKING) != 0;
         if (frame && frame->present[static_cast<size_t>(target->slot)]) {
@@ -474,7 +525,19 @@ int GameWorld::fireHitscan(Player& shooter, uint32_t viewTick, Vec3* hitPos) {
         physics_->wake(prop->physicsBody);
         physics_->addImpulse(prop->physicsBody, forward * 300.0f * std::min(physics_->mass(prop->physicsBody), 40.0f));
     }
-    if (hitPos) *hitPos = eye + forward * bestDist;
+    Vec3 pos = eye + forward * bestDist;
+    if (hitPos) *hitPos = pos;
+    if (services_.tempEntity && hit >= 0) {
+        if (hit == 0 && map_) {
+            // World: the trace gives the surface normal for the decal.
+            auto tr = bsp::traceLine(*map_, eye, end);
+            services_.tempEntity(static_cast<uint8_t>(proto::TempEntityType::Impact), tr.endPos, tr.normal);
+        } else if (dynamic_cast<Player*>(entity(hit))) {
+            services_.tempEntity(static_cast<uint8_t>(proto::TempEntityType::Blood), pos, -forward);
+        } else {
+            services_.tempEntity(static_cast<uint8_t>(proto::TempEntityType::Spark), pos, -forward);
+        }
+    }
     return hit;
 }
 
@@ -653,7 +716,7 @@ bool GameWorld::tryPush(BaseEntity& mover, const Vec3& delta) {
 
     std::vector<std::pair<Player*, Vec3>> moved; // to undo if blocked
     for (auto* p : players()) {
-        if (p->state.moveType == MOVETYPE_NOCLIP) continue;
+        if (p->state.moveType == MOVETYPE_NOCLIP || p->state.dead) continue;
         bool riding = p->state.groundEntity == mover.index && (p->state.flags & FL_ONGROUND);
         bool hit = playerOverlaps(*p, mover, p->state.origin);
         if (!riding && !hit) continue;
@@ -734,6 +797,10 @@ void GameWorld::clientCommand(int slot, const std::string& text) {
         std::string param = second == std::string::npos ? "" : rest.substr(second + 1);
         if (target.empty() || input.empty()) return;
         deliverInput(target, input, param, p, p);
+        return;
+    }
+    if (text == "kill") {
+        damagePlayer(*p, 1000, nullptr, "suicide");
         return;
     }
     if (text.rfind("setpos ", 0) == 0) {

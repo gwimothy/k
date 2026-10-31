@@ -3,6 +3,7 @@
 #include "entity.h"
 #include "game_world.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace k::game {
@@ -72,6 +73,38 @@ protected:
     bool removeAfterFire() const override { return true; }
 };
 LINK_ENTITY_TO_CLASS(trigger_once, TriggerOnce)
+
+// Hurts players inside it: "damage" per second (Source applies it in half-second steps).
+class TriggerHurt : public TriggerMultiple {
+public:
+    TriggerHurt() { wait_ = 0; }
+    bool keyValue(const std::string& k, const std::string& v) override {
+        if (nameEquals(k, "damage")) { damage_ = std::strtof(v.c_str(), nullptr); return true; }
+        return TriggerMultiple::keyValue(k, v);
+    }
+    void startTouch(BaseEntity* other) override {
+        TriggerMultiple::startTouch(other);
+        if (auto* p = dynamic_cast<Player*>(other)) {
+            inside_.push_back(p->index);
+            if (nextThink() == 0) setNextThink(world().time() + 0.01); // 0 would mean "never"
+        }
+    }
+    void endTouch(BaseEntity* other) override {
+        TriggerMultiple::endTouch(other);
+        std::erase(inside_, other->index);
+    }
+    void think() override {
+        if (inside_.empty() || !enabled_) return;
+        for (int idx : inside_)
+            if (auto* p = dynamic_cast<Player*>(world().entity(idx))) world().damagePlayer(*p, static_cast<int>(damage_ * 0.5f), nullptr, "trigger_hurt");
+        setNextThink(world().time() + 0.5);
+    }
+
+private:
+    float damage_ = 10;
+    std::vector<int> inside_;
+};
+LINK_ENTITY_TO_CLASS(trigger_hurt, TriggerHurt)
 
 // Moves the player to the entity named by "target" (an info_teleport_destination).
 class TriggerTeleport : public TriggerMultiple {

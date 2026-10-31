@@ -54,6 +54,7 @@ add_library(k_engine STATIC
   render/mesh.cpp
   render/renderer.cpp
   render/world_renderer.cpp
+  render/effects.cpp
   render/texture.cpp
   render/material.cpp
   render/model.cpp

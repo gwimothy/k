@@ -24,6 +24,7 @@ add_subdirectory(third_party/glad)
 add_subdirectory(engine)
 add_subdirectory(game)
 add_subdirectory(tools/kbsp)
+add_subdirectory(tools/kpak)
 add_subdirectory(launcher)
 
 if(K_BUILD_TESTS)

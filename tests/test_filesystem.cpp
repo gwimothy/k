@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <random>
 
 using namespace k;
@@ -61,4 +62,32 @@ TEST_CASE("exec runs a cfg file through the command buffer") {
 
     fs::clearSearchPaths();
     stdfs::remove_all(dir);
+}
+
+TEST_CASE("Archives: pack a directory, mount it, read through it; loose files win") {
+    auto src = makeTempDir("paksrc"), loose = makeTempDir("pakloose");
+    stdfs::create_directories(src / "cfg");
+    std::ofstream(src / "cfg" / "packed.cfg") << "from the pak";
+    std::ofstream(src / "cfg" / "both.cfg") << "pak version";
+    std::ofstream(src / "skip.txt") << "excluded";
+    stdfs::create_directories(loose / "cfg");
+    std::ofstream(loose / "cfg" / "both.cfg") << "loose version";
+    auto pak = src.parent_path() / (src.filename().string() + ".kpk");
+    REQUIRE(fs::writePak(src, pak, {"skip"}));
+
+    fs::clearSearchPaths();
+    fs::addSearchPath(loose, "GAME");
+    REQUIRE(fs::addArchive(pak, "GAME"));
+    CHECK(fs::readText("cfg/packed.cfg").value_or("") == "from the pak");
+    CHECK(fs::readText("CFG/Packed.cfg").value_or("") == "from the pak"); // archives are case-insensitive
+    CHECK(fs::readText("cfg/both.cfg").value_or("") == "loose version");
+    CHECK(fs::exists("cfg/packed.cfg"));
+    CHECK_FALSE(fs::exists("skip.txt"));
+    CHECK_FALSE(fs::resolve("cfg/packed.cfg").has_value()); // no filesystem path inside archives
+    CHECK_FALSE(fs::addArchive(src / "cfg" / "packed.cfg")); // not an archive
+
+    fs::clearSearchPaths();
+    stdfs::remove_all(src);
+    stdfs::remove_all(loose);
+    stdfs::remove(pak);
 }

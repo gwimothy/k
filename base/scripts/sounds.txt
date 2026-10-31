@@ -37,3 +37,6 @@
 }
 "Ambient.Hum"       { "wave" "ambient/hum_loop.wav"   "volume" "0.35" "soundlevel" "65" "loop" "1" }
 "Player.Hit"        { "wave" "buttons/button1.wav"    "volume" "1.0" "pitch" "160" "soundlevel" "85" }
+"Weapon.Fire"       { "wave" "physics/wood_impact1.wav" "volume" "0.6" "pitch" "220" "soundlevel" "85" }
+"Player.Pain"       { "wave" "player/land.wav"        "volume" "0.8" "pitch" "140" "soundlevel" "75" }
+"Player.Death"      { "wave" "doors/door_stop.wav"    "volume" "0.9" "pitch" "70"  "soundlevel" "85" }

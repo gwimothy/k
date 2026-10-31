@@ -71,9 +71,19 @@ struct AudioSystem::Impl {
     std::unordered_map<std::string, SoundScript> scripts;
     struct Playing {
         std::unique_ptr<ma_sound> sound;
+        std::unique_ptr<ma_decoder> decoder;          // decodes from `data`
+        std::shared_ptr<std::vector<uint8_t>> data;   // file bytes (shared between instances)
         std::string name;
         int entity = 0;
+        void release() {
+            if (sound) ma_sound_uninit(sound.get());
+            if (decoder) ma_decoder_uninit(decoder.get());
+            sound.reset();
+            decoder.reset();
+        }
     };
+    // Files are read through the virtual filesystem (so they can live in .kpk archives).
+    std::unordered_map<std::string, std::shared_ptr<std::vector<uint8_t>>> files;
     std::list<Playing> playing;
     std::mt19937 rng{1234};
 };
@@ -136,42 +146,58 @@ bool AudioSystem::play(const std::string& name, const Vec3& origin, int entity, 
     }
     std::uniform_int_distribution<size_t> pickWave(0, script->waves.size() - 1);
     std::string rel = "sound/" + script->waves[pickWave(impl_->rng)];
-    auto path = fs::resolve(rel);
-    if (!path) {
-        log::warn("Audio: missing file '{}' for '{}'", rel, name);
-        return false;
+    auto& cached = impl_->files[rel];
+    if (!cached) {
+        auto bytes = fs::readBinary(rel);
+        if (!bytes) {
+            log::warn("Audio: missing file '{}' for '{}'", rel, name);
+            impl_->files.erase(rel);
+            return false;
+        }
+        cached = std::make_shared<std::vector<uint8_t>>(std::move(*bytes));
     }
     if (script->loop) stop(name, entity); // one instance of a loop per entity
 
-    auto sound = std::make_unique<ma_sound>();
-    ma_uint32 flags = MA_SOUND_FLAG_DECODE; // decode up front: sounds are short
-    if (ma_sound_init_from_file(&impl_->engine, path->string().c_str(), flags, nullptr, nullptr, sound.get()) != MA_SUCCESS) {
-        log::warn("Audio: couldn't load '{}'", path->string());
+    Impl::Playing p;
+    p.data = cached;
+    p.decoder = std::make_unique<ma_decoder>();
+    ma_decoder_config dcfg = ma_decoder_config_init(ma_format_f32, 0, 0);
+    if (ma_decoder_init_memory(p.data->data(), p.data->size(), &dcfg, p.decoder.get()) != MA_SUCCESS) {
+        log::warn("Audio: couldn't decode '{}'", rel);
         return false;
     }
+    p.sound = std::make_unique<ma_sound>();
+    if (ma_sound_init_from_data_source(&impl_->engine, p.decoder.get(), 0, nullptr, p.sound.get()) != MA_SUCCESS) {
+        ma_decoder_uninit(p.decoder.get());
+        log::warn("Audio: couldn't play '{}'", rel);
+        return false;
+    }
+    ma_sound* sound = p.sound.get();
     std::uniform_real_distribution<float> pickPitch(script->pitchMin, script->pitchMax);
-    ma_sound_set_pitch(sound.get(), pickPitch(impl_->rng) / 100.0f);
-    ma_sound_set_volume(sound.get(), script->volume * vol);
-    ma_sound_set_looping(sound.get(), script->loop ? MA_TRUE : MA_FALSE);
+    ma_sound_set_pitch(sound, pickPitch(impl_->rng) / 100.0f);
+    ma_sound_set_volume(sound, script->volume * vol);
+    ma_sound_set_looping(sound, script->loop ? MA_TRUE : MA_FALSE);
     float maxDist = soundLevelToDistance(script->soundLevel);
     if (maxDist <= 0) {
-        ma_sound_set_spatialization_enabled(sound.get(), MA_FALSE);
+        ma_sound_set_spatialization_enabled(sound, MA_FALSE);
     } else {
-        ma_sound_set_attenuation_model(sound.get(), ma_attenuation_model_linear);
-        ma_sound_set_min_distance(sound.get(), 64.0f);
-        ma_sound_set_max_distance(sound.get(), maxDist);
-        ma_sound_set_position(sound.get(), origin.x, origin.y, origin.z);
+        ma_sound_set_attenuation_model(sound, ma_attenuation_model_linear);
+        ma_sound_set_min_distance(sound, 64.0f);
+        ma_sound_set_max_distance(sound, maxDist);
+        ma_sound_set_position(sound, origin.x, origin.y, origin.z);
     }
-    ma_sound_start(sound.get());
+    ma_sound_start(sound);
     if (snd_show.getBool()) log::info("sound: {} ({}) at {:.0f} {:.0f} {:.0f}", name, rel, origin.x, origin.y, origin.z);
-    impl_->playing.push_back({std::move(sound), name, entity});
+    p.name = name;
+    p.entity = entity;
+    impl_->playing.push_back(std::move(p));
     return true;
 }
 
 void AudioSystem::stop(const std::string& name, int entity) {
     for (auto it = impl_->playing.begin(); it != impl_->playing.end();) {
         if (it->entity == entity && it->name == name) {
-            ma_sound_uninit(it->sound.get());
+            it->release();
             it = impl_->playing.erase(it);
         } else {
             ++it;
@@ -180,7 +206,7 @@ void AudioSystem::stop(const std::string& name, int entity) {
 }
 
 void AudioSystem::stopAll() {
-    for (auto& p : impl_->playing) ma_sound_uninit(p.sound.get());
+    for (auto& p : impl_->playing) p.release();
     impl_->playing.clear();
 }
 
@@ -198,7 +224,7 @@ void AudioSystem::update(const Vec3& pos, const QAngle& angles, const std::vecto
                 if (idx == it->entity) ma_sound_set_position(it->sound.get(), origin.x, origin.y, origin.z);
         }
         if (ma_sound_at_end(it->sound.get()) && !ma_sound_is_looping(it->sound.get())) {
-            ma_sound_uninit(it->sound.get());
+            it->release();
             it = impl_->playing.erase(it);
         } else {
             ++it;

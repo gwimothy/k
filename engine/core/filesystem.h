@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -11,16 +12,29 @@
 
 namespace k::fs {
 
+struct PakEntry {
+    uint64_t offset = 0, size = 0;
+};
+
 struct SearchPath {
-    std::filesystem::path root;
-    std::string id; // e.g. "GAME", "MOD"
+    std::filesystem::path root;  // a directory, or a .kpk archive file
+    std::string id;              // e.g. "GAME", "MOD"
+    bool archive = false;
+    std::map<std::string, PakEntry> entries; // archives: lowercase path -> data range
 };
 
 void addSearchPath(const std::filesystem::path& root, std::string_view id = "GAME", bool front = false);
+// Mount a .kpk archive (see writePak). Returns false if it can't be read.
+bool addArchive(const std::filesystem::path& file, std::string_view id = "GAME", bool front = false);
+// Pack every file under `dir` (relative paths, forward slashes) into a .kpk archive.
+// Paths starting with any of `excludePrefixes` are skipped.
+bool writePak(const std::filesystem::path& dir, const std::filesystem::path& out,
+              const std::vector<std::string>& excludePrefixes = {}, std::string* error = nullptr);
 void clearSearchPaths();
 const std::vector<SearchPath>& searchPaths();
 
-// Find the first existing file. If id is non-empty, only search paths with that id are used.
+// Find the first existing loose file (archives have no filesystem path; use readBinary).
+// If id is non-empty, only search paths with that id are used.
 std::optional<std::filesystem::path> resolve(std::string_view relative, std::string_view id = {});
 bool exists(std::string_view relative, std::string_view id = {});
 

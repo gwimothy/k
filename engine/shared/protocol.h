@@ -9,7 +9,7 @@
 
 namespace k::proto {
 
-constexpr uint32_t kProtocolVersion = 6;
+constexpr uint32_t kProtocolVersion = 7;
 constexpr uint16_t kDefaultPort = 27015;
 constexpr int kMaxClients = 16;
 
@@ -32,6 +32,9 @@ enum class Svc : uint8_t {
     Sound = 6,       // string name, u16 entity, Vec3 origin, f32 volume, u8 flags (1 = stop)
     SetCvar = 7,     // string name, string value (replicated cvar changed)
     Disconnect = 8,  // string reason
+    TempEntity = 9,  // u8 type, Vec3 position, Vec3 normal (effects: impacts, blood)
+    KillFeed = 10,   // string attacker, string victim, string how
+    HitConfirm = 11, // (empty) your shot hit a player
 };
 
 // State of the local player, sent every tick. Replaced by general entity snapshots in Phase 5.
@@ -44,6 +47,8 @@ struct PlayerState {
     uint32_t moveType = 0;   // MoveType
     uint32_t oldButtons = 0; // buttons from the previous command (jump needs a fresh press)
     int32_t groundEntity = -1; // entity stood on: 0 world, > 0 entity (server-side bookkeeping)
+    int16_t health = 100;
+    uint8_t dead = 0;
 
     void write(net::ByteWriter& w) const {
         w.write(origin);
@@ -53,6 +58,8 @@ struct PlayerState {
         w.write(flags);
         w.write(moveType);
         w.write(oldButtons);
+        w.write(health);
+        w.write(dead);
     }
     static PlayerState read(net::ByteReader& r) {
         PlayerState s;
@@ -63,8 +70,16 @@ struct PlayerState {
         s.flags = r.read<uint32_t>();
         s.moveType = r.read<uint32_t>();
         s.oldButtons = r.read<uint32_t>();
+        s.health = r.read<int16_t>();
+        s.dead = r.read<uint8_t>();
         return s;
     }
+};
+
+enum class TempEntityType : uint8_t {
+    Impact = 1, // bullet hitting the world: dust + a decal
+    Blood = 2,  // hitting a player
+    Spark = 3,  // hitting a prop or metal
 };
 
 // A networked entity as the client sees it. Full state every tick for now; Phase 7 adds

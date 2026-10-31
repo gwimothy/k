@@ -4,11 +4,13 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phases 1-7 done** (foundation, rendering, map pipeline, movement, entities,
-> physics, audio, networking). Build maps in TrenchBroom, compile them with `kbsp` (BSP, vis,
-> baked lighting), wire up doors, buttons, elevators and triggers with Source-style entity I/O,
-> push and throw physics props, and play together over the network with client-side prediction,
-> interpolation and lag compensation.
+> Status: **all 8 roadmap phases done** (foundation, rendering, map pipeline, movement,
+> entities, physics, audio, networking, polish). Build maps in TrenchBroom, compile them with
+> `kbsp` (BSP, vis, baked lighting), wire up doors, buttons, elevators and triggers with
+> Source-style entity I/O, push and throw physics props, and play together over the network
+> with client-side prediction, interpolation and lag compensation. Health, a HUD, a main menu,
+> particles, decals and packed content are in too. See [docs/ROADMAP.md](docs/ROADMAP.md) for
+> what's next.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
@@ -40,11 +42,12 @@ macOS is not supported yet (Apple stops at OpenGL 4.1; a Metal/Vulkan backend is
 |---|---|
 | Move | W A S D |
 | Use (buttons, doors, pick up props) | E |
-| Throw a held prop | Mouse 1 |
+| Fire (hitscan) / throw a held prop | Mouse 1 |
 | Jump / crouch | Space / Ctrl (fly up/down in noclip) |
 | Walk slowly | Alt |
 | Turn / look (keyboard) | Arrow keys |
-| Console | `` ` `` or Esc |
+| Menu | Esc |
+| Console | `` ` `` |
 | Screenshot | F5 |
 | FPS / position overlay | F9 / F10 |
 
@@ -71,6 +74,16 @@ turn that off). Others join with `connect`:
 `status` lists players with ping and loss, and `net_graph 1` shows ping, bandwidth, snapshot
 rate and prediction error. `+attack` fires a lag-compensated hitscan when you aren't holding
 a prop. To test bad networks, run `net_fakelag 150` and `net_fakeloss 10` (cheats).
+
+## Shipping content
+
+Pack the game directory into an archive with `kpak`; the engine mounts every `.kpk` in the
+game directory after the loose files (so loose files still override packed ones):
+
+```sh
+./build/bin/kpak base build/release/base/content.kpk -x maps/src -x screenshots -x cfg/config.cfg
+./build/bin/kpak -l build/release/base/content.kpk
+```
 
 ## Making maps
 
@@ -117,7 +130,7 @@ engine/
 game/        game code: entities, entity I/O, physics (Jolt), rules (k_game, behind IGameServer)
 launcher/    executable entry point
 base/        game content: cfg/, shaders/, materials/, models/ (copied next to the binary)
-tools/       kbsp map compiler, TrenchBroom config, asset/map generators
+tools/       kbsp map compiler, kpak packer, TrenchBroom config, asset/map/sound generators
 tests/       unit tests (doctest)
 docs/        roadmap and architecture
 ```

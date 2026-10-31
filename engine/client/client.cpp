@@ -183,6 +183,8 @@ void Client::disconnect(const std::string& reason) {
     predictedHistory_.clear();
     modelTable_.clear();
     centerMessage_.clear();
+    killFeed_.clear();
+    tempEntities_.clear();
     slot_ = -1;
 }
 
@@ -357,6 +359,26 @@ void Client::handleMessage(net::ByteReader& r, double now) {
             if (auto* v = console::findVar(name); v && remote_) v->forceValue(value);
             break;
         }
+        case proto::Svc::TempEntity: {
+            TempEntityEvent ev;
+            ev.type = r.read<uint8_t>();
+            ev.position = r.read<Vec3>();
+            ev.normal = r.read<Vec3>();
+            tempEntities_.push_back(ev);
+            break;
+        }
+        case proto::Svc::KillFeed: {
+            KillFeedEntry e;
+            e.attacker = r.readString();
+            e.victim = r.readString();
+            e.how = r.readString();
+            e.time = platformTime();
+            log::info("{}", e.attacker.empty() ? e.victim + " died (" + e.how + ")" : e.attacker + " killed " + e.victim);
+            killFeed_.push_back(std::move(e));
+            while (killFeed_.size() > 5) killFeed_.pop_front();
+            break;
+        }
+        case proto::Svc::HitConfirm: lastHitConfirm_ = platformTime(); break;
         case proto::Svc::Disconnect: disconnect("Server: " + r.readString()); return;
         default:
             log::warn("Client: bad server message {}", static_cast<int>(type));

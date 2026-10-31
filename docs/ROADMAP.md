@@ -96,11 +96,19 @@ Each phase ends in something you can run. Items are checked off as they land.
 - [ ] Bit-packing / quantized origins and angles; fragmenting very large snapshots
 - [ ] Server browser / master server, NAT punch-through
 
-## Phase 8 - Polish
+## Phase 8 - Polish ✅ (core items)
 
-- [ ] HUD and menus
-- [ ] Normal/specular maps, env_cubemap reflections
-- [ ] Particles
-- [ ] Decals
-- [ ] Packed content files (VPK-style)
+- [x] Health, damage, death and respawn (`sv_respawntime`), Source-style fall damage, `trigger_hurt`, `kill`, kill feed
+- [x] HUD: health, hit markers, damage flash, death screen, kill feed (`hud_draw`)
+- [x] Main menu on Escape: resume, new game (map list), join, options (name, sensitivity, FOV, volume, vsync), disconnect, quit
+- [x] Particles (dust, sparks, blood) and impact decals from server temp entities (`r_decals`, `r_particles`)
+- [x] Packed content: `.kpk` archives mounted after loose files, `kpak` tool, audio decoded from memory so everything can live in a pack
+- [ ] Normal/specular maps and env_cubemap reflections (needs directional lightmaps for world surfaces)
 - [ ] Vulkan or Metal backend (enables macOS)
+
+## Next up
+
+- Full anti-penumbra vis, radiosity bounces, `light_spot`, per-leaf ambient samples for models
+- Weapons as entities (models, ammo, viewmodels), bots
+- Bit-packed snapshots; server browser
+- Runtime-loaded game module

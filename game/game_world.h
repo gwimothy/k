@@ -47,6 +47,7 @@ public:
     bool teleported = false;    // the server forces the client's view angles next tick
     int heldProp = -1;
     float footstepTimer = 0;
+    double respawnTime = 0;     // when dead
     std::vector<int> touching;  // trigger indices this player is inside
     Vec3 mins() const;
     Vec3 maxs() const;
@@ -106,6 +107,10 @@ public:
     // A hitscan shot from `shooter`, with other players rewound to `viewTick` (lag
     // compensation). Returns the entity index hit (0 = world, -1 = nothing).
     int fireHitscan(Player& shooter, uint32_t viewTick, Vec3* hitPos = nullptr);
+
+    // Hurt a player. `attacker` may be null (world, trigger_hurt, falling).
+    void damagePlayer(Player& victim, int amount, Player* attacker, const std::string& how);
+    void respawn(Player& p);
 
 private:
     void touchTriggers(Player& p);

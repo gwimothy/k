@@ -40,6 +40,16 @@ struct SoundEvent {
     bool stop;
 };
 
+struct TempEntityEvent {
+    uint8_t type;
+    Vec3 position, normal;
+};
+
+struct KillFeedEntry {
+    std::string attacker, victim, how;
+    double time;
+};
+
 struct ViewSetup {
     Vec3 origin{0};
     QAngle angles;
@@ -91,6 +101,9 @@ public:
     const std::string& centerMessage() const { return centerMessage_; }
     double centerMessageTime() const { return centerMessageTime_; }
     std::vector<SoundEvent> takeSounds() { return std::move(sounds_); }
+    std::vector<TempEntityEvent> takeTempEntities() { return std::move(tempEntities_); }
+    const std::deque<KillFeedEntry>& killFeed() const { return killFeed_; }
+    double lastHitConfirm() const { return lastHitConfirm_; }
     const std::string& disconnectReason() const { return disconnectReason_; }
 
     struct NetGraph {
@@ -150,6 +163,9 @@ private:
     std::string centerMessage_;
     double centerMessageTime_ = -1e9;
     std::vector<SoundEvent> sounds_;
+    std::vector<TempEntityEvent> tempEntities_;
+    std::deque<KillFeedEntry> killFeed_;
+    double lastHitConfirm_ = -1e9;
     int snapshotsThisSecond_ = 0, snapshotsPerSec_ = 0;
     double snapshotCounterStart_ = 0;
 };

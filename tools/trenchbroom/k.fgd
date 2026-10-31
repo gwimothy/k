@@ -79,6 +79,11 @@
     OnTrigger(output) : "Player entered"
 ]
 
+@SolidClass base(Targetname) = trigger_hurt : "Hurts players inside it."
+[
+    damage(integer) : "Damage per second" : 10
+]
+
 @SolidClass base(Targetname) = trigger_teleport : "Teleports the player to the named destination."
 [
     target(target_destination) : "Destination (info_teleport_destination)"

@@ -43,6 +43,7 @@ public:
     void disconnect();
     void quit() { quit_ = true; }
     void toggleConsole();
+    void toggleMenu() { setMenuOpen(!menuOpen_); }
     void screenshot();
     void writeConfig();
     void reloadShaders();
@@ -63,6 +64,9 @@ private:
     void pumpEvents();
     void renderFrame(float alpha);
     void drawOverlay();
+    void drawHud();
+    void drawMenu();
+    void setMenuOpen(bool open);
     void updateMouseCapture();
 
     static Host* instance_;
@@ -76,6 +80,7 @@ private:
     double fpsTimer_ = 0;
     int fpsFrames_ = 0;
     float fps_ = 0;
+    double lastFrameTime_ = 0;
 
     Server server_;
     Client client_;
@@ -87,6 +92,12 @@ private:
     std::unique_ptr<AudioSystem> audio_;
     std::vector<RenderEntity> frameEntities_;
     bool imguiReady_ = false;
+    bool menuOpen_ = false;
+    int menuPage_ = 0; // 0 main, 1 new game, 2 join, 3 options
+    char joinAddress_[128] = "127.0.0.1";
+    char nameBuffer_[64] = {};
+    int lastHealth_ = 100;
+    double damageFlashTime_ = -1e9;
     bool windowFocused_ = true;
 };
 
