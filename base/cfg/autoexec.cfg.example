@@ -1,0 +1,4 @@
+// Copy this to autoexec.cfg to run your own commands at startup. It is never overwritten.
+// sensitivity 2.5
+// fov_desired 100
+// cl_showfps 1

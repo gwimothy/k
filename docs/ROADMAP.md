@@ -1,0 +1,78 @@
+# Roadmap
+
+Each phase ends in something you can run. Items are checked off as they land.
+
+## Phase 1 - Foundation ✅
+
+- [x] CMake build, dependencies fetched automatically (SDL3, glm, Dear ImGui, doctest)
+- [x] Logging with pluggable sinks
+- [x] ConVars / ConCommands with self-registration, flags (archive, cheat, replicated, notify), min/max clamping, change callbacks
+- [x] Command buffer: `;` / newline separation, quotes, `//` comments, `wait`, `alias`, `exec`, `toggle`, `incrementvar`, `find`, `help`, `cvarlist`
+- [x] Virtual filesystem with ordered search paths
+- [x] SDL3 window + OpenGL 4.5 core context
+- [x] Key bindings with Source semantics (`+cmd` held buttons, multiple keys per button), saved to `config.cfg`
+- [x] Fixed-tick server loop (66 tick) with variable-rate rendering and interpolation
+- [x] Client/server split over an in-process loopback channel, UserCmds and snapshots
+- [x] Noclip movement
+- [x] Developer console with history and tab completion
+- [x] Debug overlays (`cl_showfps`, `cl_showpos`), PNG screenshots
+- [x] Dedicated server mode (`-dedicated`) with stdin console
+- [x] Unit tests, smoke test script, CI on Linux and Windows
+
+## Phase 2 - Rendering basics
+
+- [ ] Texture loading (PNG/TGA via stb_image) and a texture manager
+- [ ] Material system: `.kmt` text files (shader + textures + params), like VMT
+- [ ] Model loading: glTF 2.0 -> runtime mesh, with a cache
+- [ ] Debug draw API (lines, boxes, text in world) for the engine and game code
+- [ ] Skybox (cubemap)
+- [ ] Shader hot-reload when files change on disk
+- [ ] sRGB-correct pipeline, MSAA
+
+## Phase 3 - Map pipeline
+
+- [ ] Read TrenchBroom / Quake `.map` files (brushes + entities)
+- [ ] `kbsp`: CSG brushes into convex faces, build the BSP tree, write `.kbsp`
+- [ ] `kvis`: portals between leaves and a potentially visible set (PVS)
+- [ ] `klight`: baked lightmaps (direct light first, then radiosity bounces), packed into an atlas
+- [ ] Runtime: load `.kbsp`, PVS culling + frustum culling, lightmapped world shader
+- [ ] `map <name>` loads real maps; TrenchBroom game config shipped in `tools/`
+
+## Phase 4 - Movement and collision
+
+- [ ] Brush collision: trace boxes through the BSP (`TraceHull`)
+- [ ] Source-style player movement: ground/air acceleration, friction, air strafing, step-up, crouch/uncrouch, jumping, ladders later
+- [ ] `noclip` command (cheat), `sv_gravity`, `sv_accelerate`, `sv_airaccelerate`
+- [ ] Movement shared between server and client (ready for prediction)
+
+## Phase 5 - Entities and game module
+
+- [ ] Entity system with networked variables and a class factory (`LINK_ENTITY_TO_CLASS`)
+- [ ] Map entities spawned from the BSP entity lump
+- [ ] Entity I/O: outputs fire inputs on named targets with delays and parameters
+- [ ] Core entities: `info_player_start`, `func_door`, `func_button`, `trigger_once`, `trigger_multiple`, `logic_relay`, `logic_timer`, `light`, `prop_static`
+- [ ] Game code built as a separate shared library loaded by the engine through interfaces
+- [ ] Entity snapshots replace the single `PlayerState`
+
+## Phase 6 - Physics and audio
+
+- [ ] Jolt Physics integration: `prop_physics`, world collision from BSP brushes
+- [ ] Player pushing objects, `+use` pickup
+- [ ] Audio with miniaudio: 3D positional sounds, `sound` scripts, footsteps, ambient `soundscape`s
+
+## Phase 7 - Networking
+
+- [ ] UDP net channel with sequencing, acks and reliable/unreliable streams
+- [ ] Delta-compressed snapshots, bit-packed
+- [ ] Client-side prediction with correction, entity interpolation (`cl_interp`)
+- [ ] Lag compensation for hitscan
+- [ ] `connect <ip>`, `status`, multiple clients, `net_graph`
+
+## Phase 8 - Polish
+
+- [ ] HUD and menus
+- [ ] Normal/specular maps, env_cubemap reflections
+- [ ] Particles
+- [ ] Decals
+- [ ] Packed content files (VPK-style)
+- [ ] Vulkan or Metal backend (enables macOS)
