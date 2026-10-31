@@ -15,6 +15,8 @@ entity input/output wiring, and a console + cvar system driving everything.
 
 ![devroom](docs/images/devroom.png)
 
+Documentation for every component is in [docs/](docs/README.md).
+
 ## Building
 
 Needs CMake 3.24+, a C++20 compiler (GCC 13+, Clang 16+, MSVC 2022) and OpenGL 4.5.
