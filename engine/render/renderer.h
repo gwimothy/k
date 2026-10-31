@@ -12,6 +12,8 @@
 #include "render/render_target.h"
 #include "render/shader_library.h"
 #include "render/texture.h"
+#include "render/world_renderer.h"
+#include "shared/bspfile.h"
 
 #include <memory>
 #include <string>
@@ -39,8 +41,8 @@ public:
     bool init(Window& window);
     void shutdown();
 
-    // Load the level geometry for a map. Unknown maps fall back to the devroom.
-    void loadMap(const std::string& name);
+    // Set up rendering for a compiled map (world geometry, props, sky, lighting).
+    void loadMap(std::shared_ptr<const bsp::BspData> bsp);
     void unloadMap();
 
     void beginFrame();
@@ -55,6 +57,7 @@ public:
     void reloadMaterials();
 
     const FrameStats& stats() const { return stats_; }
+    const WorldStats* worldStats() const { return world_ ? &world_->stats() : nullptr; }
     const std::string& glRenderer() const { return glRendererName_; }
     TextureManager& textures() { return textures_; }
     MaterialSystem& materials() { return materials_; }
@@ -73,8 +76,11 @@ private:
     ModelManager models_;
     ShaderLibrary shaders_;
 
-    std::unique_ptr<Mesh> worldMesh_;
+    std::unique_ptr<WorldRenderer> world_;
     std::vector<StaticProp> props_;
+    // Prop lighting from the map's light_environment (until per-leaf ambient samples exist).
+    Vec3 sunDir_{0.35f, 0.25f, 0.9f}, sunColor_{1.9f, 1.75f, 1.5f};
+    Vec3 ambientSky_{0.32f, 0.38f, 0.48f}, ambientGround_{0.14f, 0.13f, 0.12f};
     Texture* sky_ = nullptr;
 
     RenderTarget sceneTarget_;   // possibly multisampled
@@ -90,9 +96,5 @@ private:
     bool screenshotPending_ = false;
     std::string glRendererName_;
 };
-
-// Geometry and props for the built-in test level.
-MeshData buildDevRoom();
-std::vector<std::pair<std::string, Vec3>> devRoomProps();
 
 } // namespace k

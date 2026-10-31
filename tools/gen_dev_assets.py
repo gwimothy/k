@@ -204,6 +204,15 @@ def main():
     for name, color in devs.items():
         write_png(os.path.join(ROOT, "materials", "dev", name + ".png"), *dev_texture(color))
     write_png(os.path.join(ROOT, "materials", "models", "props", "crate.png"), *crate_texture())
+    # Tool textures: only shown in the editor (the compiler never draws these faces).
+    tools = {
+        "toolsskybox": (120, 170, 230),
+        "toolsnodraw": (220, 200, 40),
+        "toolsplayerclip": (170, 80, 200),
+        "toolsclip": (200, 60, 60),
+    }
+    for name, color in tools.items():
+        write_png(os.path.join(ROOT, "materials", "tools", name + ".png"), *dev_texture(color, size=64))
     for face in ("px", "nx", "py", "ny", "pz", "nz"):
         write_png(os.path.join(ROOT, "materials", "skybox", "sky_day_" + face + ".png"), *sky_face(face))
     crate_glb(os.path.join(ROOT, "models", "props", "crate.glb"))

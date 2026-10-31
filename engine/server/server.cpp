@@ -24,25 +24,40 @@ struct CheatGateInstaller {
 
 } // namespace
 
-bool Server::start(std::string mapName, std::unique_ptr<net::NetChannel> clientChannel) {
+bool Server::start(std::string mapName, std::shared_ptr<const bsp::BspData> map,
+                   std::unique_ptr<net::NetChannel> clientChannel) {
     stop();
     mapName_ = std::move(mapName);
+    map_ = std::move(map);
     channel_ = std::move(clientChannel);
     tickInterval_ = 1.0f / sv_tickrate.getFloat();
     tickCount_ = 0;
     lastCommandNumber_ = 0;
     clientConnected_ = false;
-    player_ = {};
-    player_.origin = Vec3(0, 0, 0);
+    spawnPlayer();
     active_ = true;
     log::info("Server started on '{}' at {} tick", mapName_, sv_tickrate.getInt());
     return true;
+}
+
+void Server::spawnPlayer() {
+    player_ = {};
+    spawnAngles_ = {};
+    const bsp::Entity* spawn = map_ ? map_->findEntity("info_player_start") : nullptr;
+    if (!spawn) {
+        log::warn("Map has no info_player_start; spawning at the origin");
+        return;
+    }
+    player_.origin = bsp::entityVec3(*spawn, "origin");
+    Vec3 a = bsp::entityVec3(*spawn, "angles");
+    spawnAngles_ = {a.x, a.y, a.z};
 }
 
 void Server::stop() {
     if (!active_) return;
     active_ = false;
     channel_.reset();
+    map_.reset();
     log::info("Server shut down");
 }
 
@@ -73,6 +88,8 @@ void Server::readMessages() {
                     w.write(proto::kProtocolVersion);
                     w.write(tickInterval_);
                     w.writeString(mapName_);
+                    w.write(proto::Svc::SetAngle);
+                    w.write(spawnAngles_);
                     channel_->send(w.data());
                     break;
                 }

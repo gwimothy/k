@@ -1,0 +1,35 @@
+// Entity definitions for TrenchBroom. Keys mirror Source where it makes sense.
+
+@SolidClass = worldspawn : "The world"
+[
+    message(string) : "Map title"
+    skyname(string) : "Sky cubemap (materials/skybox/<name>_px.png ...)" : "sky_day"
+    _minlight(integer) : "Minimum light level (0-255)" : 0
+]
+
+@SolidClass = func_detail : "Detail brush: solid and drawn, but doesn't split the BSP or block visibility. Use for small props, trim and furniture." []
+
+@PointClass size(-16 -16 0, 16 16 72) color(0 255 0) = info_player_start : "Player spawn point"
+[
+    angles(string) : "Pitch Yaw Roll" : "0 0 0"
+]
+
+@PointClass size(-8 -8 -8, 8 8 8) color(255 255 0) = light : "Point light"
+[
+    _light(color255) : "Color (R G B) and brightness" : "255 255 255 200"
+]
+
+@PointClass size(-16 -16 -16, 16 16 16) color(255 200 0) = light_environment : "Sun and sky light. Only one per map."
+[
+    angles(string) : "Sun yaw (pitch comes from the pitch key)" : "0 0 0"
+    pitch(integer) : "Sun pitch: -90 is straight overhead" : -45
+    _light(color255) : "Sun color and brightness" : "255 255 255 200"
+    _ambient(color255) : "Sky ambient color and brightness" : "150 175 215 60"
+]
+
+@PointClass size(-16 -16 0, 16 16 32) color(200 150 100) model({ "path": model, "scale": modelscale }) = prop_static : "Static model (glTF .glb)"
+[
+    model(studio) : "Model path" : "models/props/crate.glb"
+    angles(string) : "Pitch Yaw Roll" : "0 0 0"
+    modelscale(float) : "Scale" : "1"
+]

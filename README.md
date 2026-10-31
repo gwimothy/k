@@ -4,9 +4,9 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phases 1-2 done** (foundation, rendering basics). Fly around a textured test room
-> with glTF props and a skybox, use the developer console, bind keys, hot-reload shaders and
-> materials. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: **Phases 1-3 done** (foundation, rendering, map pipeline). Build maps in TrenchBroom,
+> compile them with `kbsp` (BSP, vis, baked lighting) and fly around them with PVS culling.
+> See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
 
@@ -48,9 +48,20 @@ Command-line options work like Source:
 ./build/bin/k -dedicated +map devroom          # headless server, reads commands from stdin
 ```
 
+## Making maps
+
+Maps are made in [TrenchBroom](https://trenchbroom.github.io/) and compiled with `kbsp`.
+Setup and tips are in [tools/trenchbroom/README.md](tools/trenchbroom/README.md). Every
+`.map` in `base/maps/src/` is compiled during the build; then `map <name>` in the console.
+
+```sh
+./build/bin/kbsp -game base -o build/bin/base/maps/devroom.kbsp base/maps/src/devroom.map
+```
+
 Handy console commands: `cvarlist`, `find <text>`, `help <name>`, `bind <key> <cmd>`,
 `alias`, `exec <cfg>`, `toggle <cvar>`, `screenshot`, `getpos`, `mat_reloadall`, `quit`.
-With `sv_cheats 1`: `setpos`, `setang`, `mat_wireframe 1`, `r_showbounds 1`, `r_drawaxis 1`.
+With `sv_cheats 1`: `setpos`, `setang`, `mat_wireframe 1`, `mat_fullbright 1`, `r_novis 1`,
+`r_lockpvs 1`, `r_showbounds 1`, `r_drawaxis 1`.
 
 Your settings are written to `base/cfg/config.cfg` on exit. Put your own startup commands
 in `base/cfg/autoexec.cfg`.
@@ -80,7 +91,7 @@ engine/
   host/      main loop, startup, config
 launcher/    executable entry point
 base/        game content: cfg/, shaders/, materials/, models/ (copied next to the binary)
-tools/       asset generators and (later) map compilers
+tools/       kbsp map compiler, TrenchBroom config, asset/map generators
 tests/       unit tests (doctest)
 docs/        roadmap and architecture
 ```

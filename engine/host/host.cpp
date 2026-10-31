@@ -9,6 +9,7 @@
 #include "platform/keys.h"
 #include "platform/window.h"
 #include "render/renderer.h"
+#include "shared/bspfile.h"
 #include "ui/console_ui.h"
 
 #include <SDL3/SDL.h>
@@ -53,6 +54,27 @@ Host* host() { return Host::instance(); }
 
 ConCommand cmd_quit("quit", [](const CmdArgs&) { if (host()) host()->quit(); }, "Exit the engine.");
 ConCommand cmd_exit("exit", [](const CmdArgs&) { if (host()) host()->quit(); }, "Exit the engine.");
+std::vector<std::string> completeMapName(std::string_view partial) {
+    std::vector<std::string> out;
+    for (auto& sp : fs::searchPaths()) {
+        std::error_code ec;
+        for (auto& entry : std::filesystem::directory_iterator(sp.root / "maps", ec)) {
+            if (entry.path().extension() != ".kbsp") continue;
+            std::string n = entry.path().stem().string();
+            if (n.starts_with(partial) && std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+ConCommand cmd_maps(
+    "maps",
+    [](const CmdArgs& a) {
+        for (auto& m : completeMapName(a.arg(1))) log::info("{}", m);
+    },
+    "List available maps.");
+
 ConCommand cmd_map(
     "map",
     [](const CmdArgs& a) {
@@ -62,7 +84,7 @@ ConCommand cmd_map(
         }
         if (host()) host()->startMap(a.arg(1));
     },
-    "Start a local server on a map.");
+    "Start a local server on a map.", FCVAR_NONE, completeMapName);
 ConCommand cmd_disconnect("disconnect", [](const CmdArgs&) { if (host()) host()->disconnect(); }, "Leave the current game.");
 ConCommand cmd_toggleconsole("toggleconsole", [](const CmdArgs&) { if (host()) host()->toggleConsole(); }, "Show/hide the console.");
 ConCommand cmd_screenshot("screenshot", [](const CmdArgs&) { if (host()) host()->screenshot(); }, "Save a PNG screenshot to screenshots/.");
@@ -439,6 +461,8 @@ void Host::drawOverlay() {
             const auto& p = client_.latestState();
             auto v = client_.view(1.0f);
             ImGui::Text("pos: %.1f %.1f %.1f", p.origin.x, p.origin.y, p.origin.z);
+            if (auto* ws = renderer_->worldStats())
+                ImGui::Text("leaf %d: %zu leaves, %zu faces visible", ws->cameraLeaf, ws->visibleLeaves, ws->visibleFaces);
             ImGui::Text("ang: %.1f %.1f %.1f", v.angles.pitch, v.angles.yaw, v.angles.roll);
             ImGui::Text("vel: %.1f", glm::length(p.velocity));
             ImGui::Text("tick: %u", client_.serverTick());
@@ -448,12 +472,25 @@ void Host::drawOverlay() {
 }
 
 void Host::startMap(const std::string& name) {
+    auto bytes = fs::readBinary("maps/" + name + ".kbsp");
+    if (!bytes) {
+        log::error("map: couldn't find maps/{}.kbsp", name);
+        return;
+    }
+    std::string error;
+    auto parsed = bsp::read(*bytes, &error);
+    if (!parsed) {
+        log::error("map: maps/{}.kbsp is invalid: {}", name, error);
+        return;
+    }
+    auto map = std::make_shared<const bsp::BspData>(std::move(*parsed));
+
     disconnect();
     auto [clientEnd, serverEnd] = net::LoopbackChannel::createPair();
-    if (!server_.start(name, std::move(serverEnd))) return;
+    if (!server_.start(name, map, std::move(serverEnd))) return;
     tickAccumulator_ = 0.0;
     if (!opts_.dedicated) {
-        renderer_->loadMap(name);
+        renderer_->loadMap(map);
         client_.connect(std::move(clientEnd), player_name.getString());
     }
 }

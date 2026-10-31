@@ -8,7 +8,7 @@
 
 namespace k::proto {
 
-constexpr uint32_t kProtocolVersion = 1;
+constexpr uint32_t kProtocolVersion = 2;
 
 // Client -> server
 enum class Clc : uint8_t {
@@ -22,6 +22,7 @@ enum class Svc : uint8_t {
     ServerInfo = 1, // u32 protocol version, f32 tick interval, string map name
     Snapshot = 2,   // u32 server tick, u32 last acked command, PlayerState
     Print = 3,      // string
+    SetAngle = 4,   // QAngle: force the client's view angles (spawn, teleport)
 };
 
 // State of the local player, sent every tick. Replaced by general entity snapshots in Phase 5.

@@ -163,6 +163,7 @@ void Client::readPackets() {
                     break;
                 }
                 case proto::Svc::Print: log::info("{}", r.readString()); break;
+                case proto::Svc::SetAngle: viewAngles_ = r.read<QAngle>(); break;
                 default:
                     log::warn("Client: bad server message {}", static_cast<int>(type));
                     return;

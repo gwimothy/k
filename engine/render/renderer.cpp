@@ -33,12 +33,18 @@ ConVar r_nearz("r_nearz", "4", FCVAR_CHEAT, "Near clip plane distance.");
 ConVar r_farz("r_farz", "16384", FCVAR_CHEAT, "Far clip plane distance.");
 ConVar r_skyname("r_skyname", "sky_day", FCVAR_NONE, "Sky cubemap name (materials/skybox/<name>_px.png ...).");
 
-// Linear-space lighting for the placeholder sun (replaced by lightmaps in Phase 3).
-const Vec3 kSunDir = glm::normalize(Vec3(0.35f, 0.25f, 0.9f));
-const Vec3 kSunColor{1.9f, 1.75f, 1.5f};
-const Vec3 kAmbientSky{0.32f, 0.38f, 0.48f};
-const Vec3 kAmbientGround{0.14f, 0.13f, 0.12f};
 const Vec3 kFogColor{0.60f, 0.70f, 0.82f};
+
+Vec3 lightColor(const bsp::Entity& e, const char* key, float defBrightness) {
+    Vec4 v(255, 255, 255, defBrightness);
+    auto s = bsp::entityString(e, key);
+    if (!s.empty()) {
+        float c[4] = {255, 255, 255, defBrightness};
+        int n = std::sscanf(s.c_str(), "%f %f %f %f", &c[0], &c[1], &c[2], &c[3]);
+        if (n >= 3) v = Vec4(c[0], c[1], c[2], n == 4 ? c[3] : defBrightness);
+    }
+    return glm::pow(Vec3(v) / 255.0f, Vec3(2.2f)) * (v.w / 255.0f);
+}
 
 struct LineVertex {
     Vec3 position;
@@ -120,7 +126,7 @@ bool Renderer::init(Window& window) {
 
     // Compile everything up front so errors show at startup.
     bool ok = true;
-    for (const char* name : {"lit_generic", "unlit_generic", "sky", "debug_line", "postprocess"})
+    for (const char* name : {"lit_generic", "unlit_generic", "lightmapped_generic", "sky", "debug_line", "postprocess"})
         ok &= shaders_.get(name) != nullptr;
     if (!ok) log::error("Some shaders failed to compile; see above");
     return shaders_.get("lit_generic") && shaders_.get("postprocess");
@@ -149,18 +155,37 @@ void Renderer::reloadMaterials() {
     materials_.reloadAll();
 }
 
-void Renderer::loadMap(const std::string& name) {
-    if (name != "devroom") log::warn("Map loading arrives in Phase 3; showing devroom instead of '{}'", name);
-    worldMesh_ = std::make_unique<Mesh>();
-    worldMesh_->upload(buildDevRoom(), materials_);
-    props_.clear();
-    for (auto& [path, origin] : devRoomProps())
-        if (auto* m = models_.find(path)) props_.push_back({m, origin, {}, 1.0f});
-    sky_ = textures_.findCube(r_skyname.getString());
+void Renderer::loadMap(std::shared_ptr<const bsp::BspData> bsp) {
+    unloadMap();
+    world_ = std::make_unique<WorldRenderer>();
+    world_->load(bsp, materials_, textures_);
+
+    // Static props. They become real entities in Phase 5.
+    for (auto& e : bsp->entities) {
+        if (bsp::entityString(e, "classname") != "prop_static") continue;
+        Model* m = models_.find(bsp::entityString(e, "model"));
+        if (!m) continue;
+        Vec3 ang = bsp::entityVec3(e, "angles");
+        props_.push_back({m, bsp::entityVec3(e, "origin"), {ang.x, ang.y, ang.z}, bsp::entityFloat(e, "modelscale", 1.0f)});
+    }
+
+    if (auto* env = bsp->findEntity("light_environment")) {
+        Vec3 ang = bsp::entityVec3(*env, "angles");
+        float pitch = env->count("pitch") ? bsp::entityFloat(*env, "pitch") : ang.x;
+        angleVectors({pitch, ang.y, 0}, &sunDir_);
+        sunColor_ = lightColor(*env, "_light", 200);
+        Vec3 amb = lightColor(*env, "_ambient", 40);
+        ambientSky_ = amb;
+        ambientGround_ = amb * 0.35f + sunColor_ * 0.08f; // rough stand-in for bounced light
+    }
+
+    std::string skyName = r_skyname.getString();
+    if (!bsp->entities.empty()) skyName = bsp::entityString(bsp->entities[0], "skyname", skyName);
+    sky_ = textures_.findCube(skyName);
 }
 
 void Renderer::unloadMap() {
-    worldMesh_.reset();
+    world_.reset();
     props_.clear();
     sky_ = nullptr;
 }
@@ -199,10 +224,10 @@ void Renderer::drawMesh(const Mesh& mesh, const Mat4& model, bool translucentPas
         shader->set("u_viewProj", viewProj_);
         shader->set("u_model", model);
         shader->set("u_cameraPos", cameraPos_);
-        shader->set("u_sunDir", kSunDir);
-        shader->set("u_sunColor", kSunColor);
-        shader->set("u_ambientSky", kAmbientSky);
-        shader->set("u_ambientGround", kAmbientGround);
+        shader->set("u_sunDir", sunDir_);
+        shader->set("u_sunColor", sunColor_);
+        shader->set("u_ambientSky", ambientSky_);
+        shader->set("u_ambientGround", ambientGround_);
         shader->set("u_fogColor", kFogColor);
         shader->set("u_fogDensity", r_fog.getBool() ? r_fogdensity.getFloat() : 0.0f);
         shader->set("u_fullbright", mat_fullbright.getInt());
@@ -241,8 +266,15 @@ void Renderer::renderView(const ViewSetup& view) {
     glDisable(GL_BLEND);
     glPolygonMode(GL_FRONT_AND_BACK, mat_wireframe.getBool() ? GL_LINE : GL_FILL);
 
+    WorldRenderer::DrawParams wp{viewProj_, cameraPos_, kFogColor,
+                                 r_fog.getBool() ? r_fogdensity.getFloat() : 0.0f, mat_fullbright.getBool(), false};
+
     // Opaque
-    if (worldMesh_ && r_drawworld.getBool()) drawMesh(*worldMesh_, Mat4(1.0f), false);
+    if (world_ && r_drawworld.getBool()) {
+        world_->draw(wp, shaders_, materials_);
+        stats_.drawCalls += world_->stats().drawCalls;
+        stats_.triangles += world_->stats().triangles;
+    }
     if (r_drawprops.getBool())
         for (auto& p : props_) drawMesh(*p.model->mesh, propMatrix(p), false);
 
@@ -254,7 +286,10 @@ void Renderer::renderView(const ViewSetup& view) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
-    if (worldMesh_ && r_drawworld.getBool()) drawMesh(*worldMesh_, Mat4(1.0f), true);
+    if (world_ && r_drawworld.getBool()) {
+        wp.translucentPass = true;
+        world_->draw(wp, shaders_, materials_);
+    }
     if (r_drawprops.getBool())
         for (auto& p : props_) drawMesh(*p.model->mesh, propMatrix(p), true);
     glDepthMask(GL_TRUE);

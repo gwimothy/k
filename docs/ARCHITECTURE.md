@@ -41,6 +41,24 @@ Libraries in the build:
 | `k` | launcher executable | k_engine |
 | `k_tests` | unit tests | k_assets (no window or GPU needed) |
 
+## Map pipeline
+
+```
+TrenchBroom .map ──kbsp──► .kbsp
+  brushes.cpp   map brushes → convex brushes (planes + side polygons)
+  tree.cpp      structural brushes → solid-leaf BSP (split on brush planes, axial first)
+  portals.cpp   portals between leaves; flood from entities → leak check, outside filled
+  faces.cpp     drawable sides pushed down the tree; pieces in solid leaves are dropped
+  vis.cpp       per-leaf PVS from portal flow
+  light.cpp     lightmaps: point lights, sun + sky (shadow rays through the BSP)
+```
+
+A `.kbsp` file is a set of lumps (`engine/shared/bspfile.h`): planes, nodes, leaves, faces,
+vertices, brushes (for collision), models, materials, compressed vis, the lightmap atlas, and
+a text entity lump. The server uses it for entities (and collision in Phase 4). The renderer
+finds the camera's leaf, decompresses its PVS, frustum-culls leaf bounds, and batches visible
+faces by material into `glMultiDrawElements` calls.
+
 ## Rendering
 
 ```

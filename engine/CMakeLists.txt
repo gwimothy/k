@@ -14,6 +14,8 @@ k_set_warnings(k_core)
 # k_assets: asset code that needs no GPU (mesh building, glTF parsing). Tests link this.
 add_library(k_assets STATIC
   core/keyvalues.cpp
+  shared/bspfile.cpp
+  shared/bsp_trace.cpp
   render/mesh_data.cpp
   render/gltf_loader.cpp
 )
@@ -28,7 +30,7 @@ add_library(k_engine STATIC
   render/shader.cpp
   render/mesh.cpp
   render/renderer.cpp
-  render/devroom.cpp
+  render/world_renderer.cpp
   render/texture.cpp
   render/material.cpp
   render/model.cpp
