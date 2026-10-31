@@ -43,8 +43,8 @@ rm -rf "$SHOTS"
 # Xvfb has no DRI3/GLX acceleration; EGL + Mesa llvmpipe gives a software GL 4.5 context.
 export SDL_VIDEO_FORCE_EGL=1
 # Note: screenshot captures at the end of the frame, so each one is followed by +wait.
-out=$("${RUNNER[@]}" "$EXE" -w 1280 -h 720 \
-  +mat_vsync 0 +cl_showfps 1 +cl_showpos 1 +sv_cheats 1 +developer_io 1 \
+out=$("${RUNNER[@]}" "$EXE" -w 1280 -h 720 -nosound \
+  +mat_vsync 0 +cl_showfps 1 +cl_showpos 1 +sv_cheats 1 +developer_io 1 +snd_show 1 \
   +wait 30 +screenshot +wait \
   ++forward +wait 60 +-forward +wait 10 +getpos \
   +setpos 380 -420 0 +setang 6 150 +r_showbounds 1 +wait 10 +screenshot +wait \
@@ -65,4 +65,7 @@ if grep -q "failed to compile\|failed to link" <<<"$out"; then echo "FAIL: shade
 grep -q "Welcome to the dev room" <<<"$out" || { echo "FAIL: logic_auto/point_message didn't fire"; exit 1; }
 grep -q "corridor_door' : Open" <<<"$out" || { echo "FAIL: the button didn't open the door"; exit 1; }
 grep -qE "setpos 784.00 -816.00 20[0-9]\." <<<"$out" || { echo "FAIL: the elevator didn't carry the player up"; exit 1; }
+# Physics + sound: crates fall and clatter on map start, the door rumbles.
+grep -q "sound: Door.Move" <<<"$out" || { echo "FAIL: no door sound"; exit 1; }
+grep -q "sound: Ambient.Hum" <<<"$out" || { echo "FAIL: ambient_generic didn't play"; exit 1; }
 echo "== All smoke tests passed ($count screenshots in $SHOTS)"

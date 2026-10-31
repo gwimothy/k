@@ -141,3 +141,19 @@
     model(studio) : "Model path"
     angles(string) : "Pitch Yaw Roll" : "0 0 0"
 ]
+
+// ---- Physics and sound ------------------------------------------------------------------
+
+@PointClass base(Targetname) color(220 160 90) model({ "path": model }) size(-16 -16 0, 16 16 32) = prop_physics : "A physics model: falls, can be pushed, picked up (+use) and thrown (+attack)."
+[
+    model(studio) : "Model path" : "models/props/crate.glb"
+    angles(string) : "Pitch Yaw Roll" : "0 0 0"
+    massScale(float) : "Mass multiplier" : "1"
+]
+
+@PointClass base(Targetname) color(120 200 255) size(-8 -8 -8, 8 8 8) = ambient_generic : "Plays a sound script here (loops if the script loops)."
+[
+    message(sound) : "Sound script name" : "Ambient.Hum"
+    health(integer) : "Volume (0-10)" : 10
+    spawnflags(flags) = [ 16 : "Start silent" : 0 ]
+]

@@ -201,6 +201,11 @@ def devroom():
     m.entity({"classname": "point_message", "targetname": "hud", "origin": "0 0 64"})
     m.entity({"classname": "logic_auto", "OnMapSpawn": "hud,ShowHudMessage,Welcome to the dev room,1,-1"})
 
+    # ---- Physics and sound (Phase 6) ----
+    for origin in ("420 300 0", "460 300 0", "440 300 33", "420 340 0", "600 -300 0", "620 -300 40"):
+        m.entity({"classname": "prop_physics", "model": "models/props/crate.glb", "origin": origin, "angles": "0 15 0"})
+    m.entity({"classname": "ambient_generic", "message": "Ambient.Hum", "health": "8", "origin": "%d 0 120" % (rx0 + 256)})
+
     m.entity({"classname": "info_player_start", "origin": "0 0 0", "angles": "0 0 0"})
     m.entity({"classname": "light_environment", "angles": "0 35 0", "pitch": "-50",
               "_light": "255 238 210 380", "_ambient": "150 175 215 90"})

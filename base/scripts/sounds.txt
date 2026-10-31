@@ -1,0 +1,38 @@
+// Sound scripts: game code plays sounds by these names, never by file.
+//
+//   "volume"      0..1
+//   "pitch"       percent, or a "min,max" range picked at random
+//   "soundlevel"  dB: how far it carries (60 quiet, 75 normal, 90 loud). 0 = everywhere
+//   "loop"        1 to loop until stopped
+//   "wave" / "rndwave" { "wave" ... }   file(s) under sound/
+
+"Player.Footstep"
+{
+    "volume" "0.45"
+    "pitch" "95,105"
+    "soundlevel" "70"
+    "rndwave"
+    {
+        "wave" "player/footstep1.wav"
+        "wave" "player/footstep2.wav"
+        "wave" "player/footstep3.wav"
+        "wave" "player/footstep4.wav"
+    }
+}
+"Player.Jump"       { "wave" "player/jump.wav"        "volume" "0.4" "soundlevel" "70" }
+"Player.Land"       { "wave" "player/land.wav"        "volume" "0.7" "soundlevel" "75" }
+"Button.Press"      { "wave" "buttons/button1.wav"    "volume" "0.8" "soundlevel" "75" }
+"Door.Move"         { "wave" "doors/door_move.wav"    "volume" "0.5" "soundlevel" "80" "loop" "1" }
+"Door.Stop"         { "wave" "doors/door_stop.wav"    "volume" "0.8" "soundlevel" "80" }
+"Physics.WoodImpact"
+{
+    "volume" "0.8"
+    "pitch" "90,110"
+    "soundlevel" "75"
+    "rndwave"
+    {
+        "wave" "physics/wood_impact1.wav"
+        "wave" "physics/wood_impact2.wav"
+    }
+}
+"Ambient.Hum"       { "wave" "ambient/hum_loop.wav"   "volume" "0.35" "soundlevel" "65" "loop" "1" }

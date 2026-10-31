@@ -23,6 +23,16 @@ target_include_directories(k_assets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(k_assets PUBLIC k_core PRIVATE cgltf_headers)
 k_set_warnings(k_assets)
 
+# k_audio: sound scripts and playback (miniaudio). No window or GPU needed.
+add_library(k_audio STATIC audio/audio.cpp)
+target_include_directories(k_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+find_package(Threads REQUIRED)
+target_link_libraries(k_audio PUBLIC k_assets PRIVATE miniaudio_headers Threads::Threads ${CMAKE_DL_LIBS})
+if(UNIX AND NOT APPLE)
+  target_link_libraries(k_audio PRIVATE m)
+endif()
+k_set_warnings(k_audio)
+
 # k_engine: everything else (window, renderer, client, server, host).
 add_library(k_engine STATIC
   platform/keys.cpp
@@ -46,5 +56,5 @@ add_library(k_engine STATIC
   host/host.cpp
 )
 target_include_directories(k_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(k_engine PUBLIC k_assets k_game SDL3::SDL3-static glad imgui PRIVATE stb_headers)
+target_link_libraries(k_engine PUBLIC k_assets k_game k_audio SDL3::SDL3-static glad imgui PRIVATE stb_headers)
 k_set_warnings(k_engine)

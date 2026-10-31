@@ -81,6 +81,7 @@ void linkEntities_logic();
 void linkEntities_triggers();
 void linkEntities_movers();
 void linkEntities_misc();
+void linkEntities_props();
 
 GameWorld::GameWorld(EngineServices services) : services_(std::move(services)) {
     events_.world_ = this;
@@ -88,6 +89,7 @@ GameWorld::GameWorld(EngineServices services) : services_(std::move(services)) {
     linkEntities_triggers();
     linkEntities_movers();
     linkEntities_misc();
+    linkEntities_props();
 }
 GameWorld::~GameWorld() = default;
 
@@ -141,6 +143,9 @@ BaseEntity* GameWorld::spawnEntity(const bsp::Entity& keys) {
         if (!raw->keyValue(k, v)) log::debug("{}: unused key '{}'", cls, k);
     }
     raw->spawn();
+    // Solid brush entities get a kinematic physics body so props collide with doors and lifts.
+    if (physics_ && map_ && raw->solid == Solid::Bsp && raw->brushModel > 0 && !raw->physicsBody.valid())
+        raw->physicsBody = physics_->addBrushModel(*map_, raw->brushModel, raw->origin);
     return raw;
 }
 
@@ -148,6 +153,8 @@ bool GameWorld::levelInit(const std::string& /*mapName*/, std::shared_ptr<const 
     levelShutdown();
     map_ = std::move(map);
     time_ = 0;
+    physics_ = std::make_unique<PhysicsWorld>();
+    if (map_) physics_->loadWorld(*map_);
 
     // Slot 0 is the world; slot 1 is reserved for the player.
     auto worldEnt = std::make_unique<BaseEntity>();
@@ -181,7 +188,9 @@ bool GameWorld::levelInit(const std::string& /*mapName*/, std::shared_ptr<const 
 void GameWorld::levelShutdown() {
     events_.clear();
     touching_.clear();
-    entities_.clear();
+    entities_.clear(); // before physics_: entities may own bodies
+    physics_.reset();
+    heldProp_ = -1;
     modelTable_.clear();
     player_ = nullptr;
     map_.reset();
@@ -242,6 +251,40 @@ bsp::TraceResult GameWorld::traceBox(const Vec3& start, const Vec3& end, const V
     best.endPos = end;
     if (map_) best = bsp::traceBox(*map_, start, end, mins, maxs, mask);
     if (best.allSolid || !map_) return best;
+    // Physics props block like boxes (their world bounds). Overlaps at the start are ignored
+    // so a prop that lands on the player can't trap them.
+    for (auto& e : entities_) {
+        if (!e || !e->physicsDriven || e->index == heldProp_) continue;
+        Vec3 bmin = e->absMins() - maxs, bmax = e->absMaxs() - mins; // Minkowski-expanded
+        Vec3 dir = end - start;
+        float tEnter = 0, tExit = 1;
+        int axis = -1;
+        bool inside = true, miss = false;
+        for (int i = 0; i < 3 && !miss; ++i) {
+            if (start[i] < bmin[i] || start[i] > bmax[i]) inside = false;
+            if (std::fabs(dir[i]) < 1e-7f) {
+                if (start[i] < bmin[i] || start[i] > bmax[i]) miss = true;
+                continue;
+            }
+            float t1 = (bmin[i] - start[i]) / dir[i], t2 = (bmax[i] - start[i]) / dir[i];
+            if (t1 > t2) std::swap(t1, t2);
+            if (t1 > tEnter) { tEnter = t1; axis = i; }
+            tExit = std::min(tExit, t2);
+            if (tEnter > tExit) miss = true;
+        }
+        if (miss || inside || axis < 0) continue;
+        float len = glm::length(dir);
+        float frac = std::max(0.0f, tEnter - (len > 0 ? bsp::kDistEpsilon / len : 0.0f));
+        if (frac < best.fraction) {
+            best.fraction = frac;
+            best.endPos = start + dir * frac;
+            best.normal = Vec3(0);
+            best.normal[axis] = dir[axis] > 0 ? -1.0f : 1.0f;
+            best.entity = e->index;
+            best.contents = bsp::CONTENTS_SOLID;
+            moveTouches_.push_back(e->index);
+        }
+    }
     for (auto& e : entities_) {
         if (!e || e->solid != Solid::Bsp || e->brushModel <= 0) continue;
         // Cheap reject: swept box vs the entity's bounds.
@@ -277,11 +320,17 @@ void GameWorld::runCommand(const UserCmd& cmd, float dt) {
     params.autoBunnyhop = sv_autobunnyhopping.getBool();
     params.noclipSpeed = sv_noclipspeed.getFloat();
     params.noclipAccelerate = sv_noclipaccelerate.getFloat();
+    moveTouches_.clear();
+    Vec3 velocityBefore = player_->state.velocity;
+    proto::PlayerState stateBefore = player_->state;
     playerMove(player_->state, cmd, dt, params, map_ ? static_cast<const TraceWorld*>(this) : nullptr);
     player_->origin = player_->state.origin;
     player_->angles = player_->state.viewAngles;
+    pushTouchedProps(velocityBefore);
+    playerSounds(stateBefore, dt);
 
     if ((cmd.buttons & IN_USE) && !(player_->lastButtons & IN_USE)) handleUse();
+    updateHeldProp(cmd, dt);
     player_->lastButtons = cmd.buttons;
     touchTriggers();
 }
@@ -303,7 +352,124 @@ void GameWorld::handleUse() {
             best = e.get();
         }
     }
-    if (best) best->use(player_);
+    if (best) {
+        best->use(player_);
+        return;
+    }
+    if (heldProp_ >= 0) { // drop
+        heldProp_ = -1;
+        return;
+    }
+    // Pick up the nearest light prop in front of us.
+    float propDist = std::min(wallDist + 8.0f, 96.0f);
+    for (auto& e : entities_) {
+        if (!e || !e->physicsDriven) continue;
+        float d = rayBox(eye, forward, e->absMins(), e->absMaxs());
+        if (d >= 0 && d <= propDist && physics_->mass(e->physicsBody) <= 60.0f) {
+            propDist = d;
+            heldProp_ = e->index;
+        }
+    }
+}
+
+void GameWorld::updateHeldProp(const UserCmd& cmd, float dt) {
+    BaseEntity* prop = entity(heldProp_);
+    if (!prop || !prop->physicsDriven) {
+        heldProp_ = -1;
+        return;
+    }
+    Vec3 eye = player_->state.origin + Vec3(0, 0, player_->state.viewHeight);
+    Vec3 forward;
+    angleVectors(player_->state.viewAngles, &forward);
+    Vec3 center = (prop->absMins() + prop->absMaxs()) * 0.5f;
+    float radius = glm::length(prop->absMaxs() - prop->absMins()) * 0.5f;
+    if (cmd.buttons & IN_ATTACK) {
+        // Throw.
+        physics_->setLinearVelocity(prop->physicsBody, forward * 700.0f + player_->state.velocity);
+        heldProp_ = -1;
+        return;
+    }
+    Vec3 target = eye + forward * (24.0f + radius);
+    Vec3 toTarget = target - center;
+    if (glm::length(toTarget) > 160.0f) { // snagged on something: let go
+        heldProp_ = -1;
+        return;
+    }
+    Vec3 vel = toTarget / std::max(dt, 1e-3f) * 0.4f + player_->state.velocity;
+    float speed = glm::length(vel);
+    if (speed > 1200.0f) vel *= 1200.0f / speed;
+    physics_->wake(prop->physicsBody);
+    physics_->setLinearVelocity(prop->physicsBody, vel);
+    physics_->setAngularVelocity(prop->physicsBody, Vec3(0));
+}
+
+void GameWorld::emitSound(const std::string& name, const BaseEntity* entity, const Vec3& origin, float volume) {
+    if (!services_.emitSound || name.empty()) return;
+    services_.emitSound(name, entity ? entity->index : 0, entity ? (entity->absMins() + entity->absMaxs()) * 0.5f : origin,
+                        volume, false);
+}
+
+void GameWorld::stopSound(const std::string& name, const BaseEntity* entity) {
+    if (services_.emitSound && entity) services_.emitSound(name, entity->index, entity->origin, 0.0f, true);
+}
+
+void GameWorld::playerSounds(const proto::PlayerState& before, float dt) {
+    const auto& s = player_->state;
+    if (s.moveType == MOVETYPE_NOCLIP) return;
+    bool wasGround = before.flags & FL_ONGROUND, onGround = s.flags & FL_ONGROUND;
+    if (wasGround && !onGround && s.velocity.z > 200.0f) emitSound("Player.Jump", nullptr, s.origin, 1.0f);
+    if (!wasGround && onGround && before.velocity.z < -300.0f)
+        emitSound("Player.Land", nullptr, s.origin, std::clamp(-before.velocity.z / 600.0f, 0.3f, 1.0f));
+    // Footsteps: Source steps every ~0.3 s at run speed; quieter and slower when walking.
+    float speed = glm::length(Vec2(s.velocity.x, s.velocity.y));
+    if (onGround && speed > 90.0f && !(s.flags & FL_DUCKING)) {
+        footstepTimer_ -= dt;
+        if (footstepTimer_ <= 0) {
+            emitSound("Player.Footstep", nullptr, s.origin, speed > 200.0f ? 1.0f : 0.5f);
+            footstepTimer_ = speed > 200.0f ? 0.32f : 0.45f;
+        }
+    } else {
+        footstepTimer_ = 0.1f;
+    }
+}
+
+void GameWorld::propImpactSounds() {
+    if (propMotion_.size() < entities_.size()) propMotion_.resize(entities_.size());
+    for (auto& e : entities_) {
+        if (!e || !e->physicsDriven) continue;
+        auto& m = propMotion_[static_cast<size_t>(e->index)];
+        Vec3 v = physics_->linearVelocity(e->physicsBody);
+        float change = glm::length(v - m.velocity);
+        // A sudden change in velocity that isn't the player carrying it = an impact.
+        if (change > 140.0f && e->index != heldProp_ && time_ - m.lastImpact > 0.15) {
+            emitSound("Physics.WoodImpact", e.get(), e->origin, std::clamp(change / 500.0f, 0.2f, 1.0f));
+            m.lastImpact = time_;
+        }
+        m.velocity = v;
+    }
+}
+
+void GameWorld::pushTouchedProps(const Vec3& playerVelocity) {
+    if (moveTouches_.empty()) return;
+    std::sort(moveTouches_.begin(), moveTouches_.end());
+    moveTouches_.erase(std::unique(moveTouches_.begin(), moveTouches_.end()), moveTouches_.end());
+    Vec3 flat(playerVelocity.x, playerVelocity.y, 0);
+    float speed = glm::length(flat);
+    if (speed < 10.0f) return;
+    Vec3 dir = flat / speed;
+    for (int idx : moveTouches_) {
+        BaseEntity* e = entity(idx);
+        if (!e || !e->physicsDriven || idx == heldProp_) continue;
+        // Nudge the prop toward walking speed, more gently for heavy ones.
+        float mass = std::max(1.0f, physics_->mass(e->physicsBody));
+        Vec3 v = physics_->linearVelocity(e->physicsBody);
+        float along = glm::dot(v, dir);
+        float want = std::min(speed, 200.0f) * std::clamp(40.0f / mass, 0.1f, 1.0f);
+        if (along < want) {
+            physics_->wake(e->physicsBody);
+            physics_->setLinearVelocity(e->physicsBody, v + dir * (want - along) * 0.5f);
+        }
+    }
 }
 
 bool GameWorld::playerOverlaps(const BaseEntity& e, const Vec3& playerOrigin) const {
@@ -414,6 +580,15 @@ void GameWorld::clientCommand(const std::string& text) {
 
 void GameWorld::frame(float dt) {
     time_ += dt;
+    // Physics: kinematic bodies follow their entities, then simulate, then props follow bodies.
+    if (physics_) {
+        for (auto& e : entities_)
+            if (e && !e->physicsDriven && e->physicsBody.valid()) physics_->moveKinematic(e->physicsBody, e->origin, dt);
+        physics_->step(dt);
+        for (auto& e : entities_)
+            if (e && e->physicsDriven) physics_->getTransform(e->physicsBody, e->origin, e->angles);
+        propImpactSounds();
+    }
     // Think functions. Copy the list: thinking can spawn or remove entities.
     for (size_t i = 0; i < entities_.size(); ++i) {
         BaseEntity* e = entities_[i].get();
@@ -425,6 +600,8 @@ void GameWorld::frame(float dt) {
     for (auto& e : entities_)
         if (e && e->markedForDeletion && e.get() != player_) {
             std::erase(touching_, e->index);
+            if (e->physicsBody.valid() && physics_) physics_->removeBody(e->physicsBody);
+            if (heldProp_ == e->index) heldProp_ = -1;
             e.reset();
         }
 }

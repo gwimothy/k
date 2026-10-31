@@ -13,6 +13,7 @@
 // with declareOutput() so map keys can connect them.
 
 #include "entity_io.h"
+#include "physics.h"
 #include "shared/bspfile.h"
 #include "shared/protocol.h"
 
@@ -65,6 +66,8 @@ public:
     uint32_t effects = 0;
     bool networked = false;        // included in snapshots
     bool markedForDeletion = false;
+    PhysicsBody physicsBody;       // dynamic props and kinematic brush entities
+    bool physicsDriven = false;    // origin/angles come from the physics body each tick
 
     // World-space bounds (brush entities: model bounds moved by origin).
     Vec3 absMins() const;

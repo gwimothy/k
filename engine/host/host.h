@@ -13,6 +13,7 @@ namespace k {
 class Window;
 class Renderer;
 class ConsoleUI;
+class AudioSystem;
 
 struct LaunchOptions {
     bool dedicated = false;
@@ -22,6 +23,7 @@ struct LaunchOptions {
     std::string gameDir = "base";
     std::string startupCommands; // the "+cmd args" part of the command line
     bool hasMapCommand = false;
+    bool noSound = false;
 };
 
 LaunchOptions parseCommandLine(const std::vector<std::string>& args);
@@ -46,6 +48,7 @@ public:
     void setAng(const QAngle& angles);
     void printPos();
     void forwardToServer(const std::string& text);
+    void playSound(const std::string& name);
 
     static Host* instance() { return instance_; }
 
@@ -76,6 +79,8 @@ private:
     std::unique_ptr<Window> window_;
     std::unique_ptr<Renderer> renderer_;
     std::unique_ptr<ConsoleUI> console_;
+    std::unique_ptr<AudioSystem> audio_;
+    std::vector<RenderEntity> frameEntities_;
     bool imguiReady_ = false;
     bool windowFocused_ = true;
 };

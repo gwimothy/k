@@ -3,6 +3,8 @@
 #include "core/cvar.h"
 #include "core/log.h"
 
+#include <algorithm>
+
 namespace k {
 namespace {
 
@@ -43,6 +45,16 @@ bool Server::start(std::string mapName, std::shared_ptr<const bsp::BspData> map,
         net::ByteWriter w;
         w.write(proto::Svc::CenterPrint);
         w.writeString(text);
+        sendReliable(w);
+    };
+    services.emitSound = [this](const std::string& name, int entity, const Vec3& origin, float volume, bool stop) {
+        net::ByteWriter w;
+        w.write(proto::Svc::Sound);
+        w.writeString(name);
+        w.write(static_cast<uint16_t>(std::max(0, entity)));
+        w.write(origin);
+        w.write(volume);
+        w.write(static_cast<uint8_t>(stop ? 1 : 0));
         sendReliable(w);
     };
     game_ = game::createGameServer(std::move(services));

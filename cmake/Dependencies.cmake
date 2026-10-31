@@ -40,7 +40,31 @@ FetchContent_Declare(cgltf
   GIT_SHALLOW TRUE
   SOURCE_SUBDIR _none)
 
-FetchContent_MakeAvailable(SDL3 glm imgui doctest stb cgltf)
+FetchContent_Declare(miniaudio
+  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+  GIT_TAG 0.11.22
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _none)
+
+# ---- Jolt Physics ---------------------------------------------------------------------
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+FetchContent_Declare(JoltPhysics
+  GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+  GIT_TAG v5.3.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR Build)
+
+FetchContent_MakeAvailable(SDL3 glm imgui doctest stb cgltf miniaudio JoltPhysics)
 
 add_library(glm_headers INTERFACE)
 target_include_directories(glm_headers SYSTEM INTERFACE ${glm_SOURCE_DIR})
@@ -66,3 +90,6 @@ add_library(stb_headers INTERFACE)
 target_include_directories(stb_headers SYSTEM INTERFACE ${stb_SOURCE_DIR})
 add_library(cgltf_headers INTERFACE)
 target_include_directories(cgltf_headers SYSTEM INTERFACE ${cgltf_SOURCE_DIR})
+
+add_library(miniaudio_headers INTERFACE)
+target_include_directories(miniaudio_headers SYSTEM INTERFACE ${miniaudio_SOURCE_DIR})

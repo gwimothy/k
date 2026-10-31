@@ -33,6 +33,8 @@ public:
         if (nameEquals(k, "locked")) { locked_ = toInt(v) != 0; return true; }
         if (nameEquals(k, "spawnpos")) { startOpen_ = toInt(v) != 0; return true; }
         if (nameEquals(k, "spawnflags")) { spawnflags_ = toInt(v); return true; }
+        if (nameEquals(k, "noise1")) { moveSound_ = v; return true; }
+        if (nameEquals(k, "noise2")) { stopSound_ = v; return true; }
         return BaseEntity::keyValue(k, v);
     }
 
@@ -79,6 +81,8 @@ public:
         }
         if (arrive) {
             origin = dest;
+            world().stopSound(moveSound_, this);
+            world().emitSound(stopSound_, this, origin);
             if (state_ == State::Opening) {
                 state_ = State::Open;
                 reachedOpen();
@@ -100,6 +104,7 @@ public:
         }
         if (!open && (state_ == State::Closed || state_ == State::Closing)) return;
         state_ = open ? State::Opening : State::Closing;
+        world().emitSound(moveSound_, this, origin);
         if (open) startedOpening();
         else startedClosing();
         setNextThink(world().time() + kTick);
@@ -117,6 +122,7 @@ protected:
     float speed_ = 100, wait_ = 4, lip_ = 0;
     bool locked_ = false, startOpen_ = false, hasMoveDir_ = false;
     int spawnflags_ = 0;
+    std::string moveSound_, stopSound_;
     QAngle moveAngles_;
     Vec3 moveDir_{0, 0, 1}, pos1_{0}, pos2_{0};
     State state_ = State::Closed;
@@ -127,6 +133,8 @@ class FuncDoor : public LinearMover {
 public:
     Output onOpen, onClose, onFullyOpen, onFullyClosed, onLockedUse, onBlocked;
     FuncDoor() {
+        moveSound_ = "Door.Move";
+        stopSound_ = "Door.Stop";
         declareOutput("OnOpen", &onOpen);
         declareOutput("OnClose", &onClose);
         declareOutput("OnFullyOpen", &onFullyOpen);
@@ -172,6 +180,11 @@ public:
         declareOutput("OnUseLocked", &onUseLocked);
         speed_ = 40;
         wait_ = 1;
+        pressSound_ = "Button.Press";
+    }
+    bool keyValue(const std::string& k, const std::string& v) override {
+        if (nameEquals(k, "sound")) { pressSound_ = v; return true; }
+        return LinearMover::keyValue(k, v);
     }
     void spawn() override {
         // Buttons travel 4 units unless a lip says otherwise.
@@ -183,6 +196,7 @@ public:
         if (locked_) { onUseLocked.fire(activator, this); return; }
         if (state_ != State::Closed) return;
         activator_ = activator ? activator->index : -1;
+        world().emitSound(pressSound_, this, origin);
         onPressed.fire(activator, this);
         startMove(true);
     }
@@ -197,6 +211,7 @@ protected:
     void reachedOpen() override { onIn.fire(world().entity(activator_), this); }
     void reachedClosed() override { onOut.fire(world().entity(activator_), this); }
     int activator_ = -1;
+    std::string pressSound_;
 };
 LINK_ENTITY_TO_CLASS(func_button, FuncButton)
 

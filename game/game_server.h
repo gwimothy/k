@@ -20,6 +20,8 @@ namespace k::game {
 struct EngineServices {
     std::function<void(const std::string&)> print;        // console message to the client
     std::function<void(const std::string&)> centerPrint;  // on-screen message to the client
+    // Play (or stop) a sound script on the client. entity > 0 attaches it to that entity.
+    std::function<void(const std::string& name, int entity, const Vec3& origin, float volume, bool stop)> emitSound;
 };
 
 class IGameServer {

@@ -64,6 +64,7 @@ public:
     std::vector<BaseEntity*> findByName(const std::string& pattern) const;
     BaseEntity* findFirstByName(const std::string& name) const;
     Player* player() const { return player_; }
+    PhysicsWorld* physics() const { return physics_.get(); }
     const EngineServices& services() const { return services_; }
 
     // Spawn an entity from key/values (used by map loading and by tests).
@@ -73,6 +74,10 @@ public:
     // Returns false (and doesn't move) if the player is in the way and can't be moved.
     bool tryPush(BaseEntity& mover, const Vec3& delta);
 
+    // Play a sound script at an entity (follows it) or at a position (entity = nullptr).
+    void emitSound(const std::string& name, const BaseEntity* entity, const Vec3& origin, float volume = 1.0f);
+    void stopSound(const std::string& name, const BaseEntity* entity);
+
     // Deliver an input right now (the event queue calls this).
     void deliverInput(const std::string& target, const std::string& input, const std::string& param,
                       BaseEntity* activator, BaseEntity* caller);
@@ -80,6 +85,10 @@ public:
 private:
     void touchTriggers();
     void handleUse();
+    void updateHeldProp(const UserCmd& cmd, float dt);
+    void pushTouchedProps(const Vec3& playerVelocity);
+    void playerSounds(const proto::PlayerState& before, float dt);
+    void propImpactSounds();
     int addEntity(std::unique_ptr<BaseEntity> e);
     void buildModelTable();
     bool playerOverlaps(const BaseEntity& e, const Vec3& playerOrigin) const;
@@ -90,6 +99,15 @@ private:
     std::vector<int> touching_; // trigger indices the player is inside
     std::vector<std::string> modelTable_;
     EventQueue events_;
+    std::unique_ptr<PhysicsWorld> physics_;
+    mutable std::vector<int> moveTouches_; // props hit by the player's movement traces this command
+    int heldProp_ = -1;
+    float footstepTimer_ = 0;
+    struct PropMotion {
+        Vec3 velocity{0};
+        double lastImpact = -1;
+    };
+    std::vector<PropMotion> propMotion_; // by entity index
     Player* player_ = nullptr;
     QAngle spawnAngles_;
     double time_ = 0;

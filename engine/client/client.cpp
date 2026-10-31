@@ -193,6 +193,16 @@ void Client::readPackets() {
                 }
                 case proto::Svc::Print: log::info("{}", r.readString()); break;
                 case proto::Svc::SetAngle: viewAngles_ = r.read<QAngle>(); break;
+                case proto::Svc::Sound: {
+                    SoundEvent ev;
+                    ev.name = r.readString();
+                    ev.entity = r.read<uint16_t>();
+                    ev.origin = r.read<Vec3>();
+                    ev.volume = r.read<float>();
+                    ev.stop = (r.read<uint8_t>() & 1) != 0;
+                    sounds_.push_back(std::move(ev));
+                    break;
+                }
                 case proto::Svc::CenterPrint:
                     centerMessage_ = r.readString();
                     centerMessageTime_ = platformTime();

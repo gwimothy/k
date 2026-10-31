@@ -425,6 +425,48 @@
 "OnMapSpawn" "hud,ShowHudMessage,Welcome to the dev room,1,-1"
 }
 {
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "420 300 0"
+"angles" "0 15 0"
+}
+{
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "460 300 0"
+"angles" "0 15 0"
+}
+{
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "440 300 33"
+"angles" "0 15 0"
+}
+{
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "420 340 0"
+"angles" "0 15 0"
+}
+{
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "600 -300 0"
+"angles" "0 15 0"
+}
+{
+"classname" "prop_physics"
+"model" "models/props/crate.glb"
+"origin" "620 -300 40"
+"angles" "0 15 0"
+}
+{
+"classname" "ambient_generic"
+"message" "Ambient.Hum"
+"health" "8"
+"origin" "1808 0 120"
+}
+{
 "classname" "info_player_start"
 "origin" "0 0 0"
 "angles" "0 0 0"

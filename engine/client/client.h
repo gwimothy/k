@@ -22,6 +22,14 @@ struct RenderEntity {
     QAngle angles;
 };
 
+struct SoundEvent {
+    std::string name;
+    int entity;
+    Vec3 origin;
+    float volume;
+    bool stop;
+};
+
 struct ViewSetup {
     Vec3 origin{0};
     QAngle angles;
@@ -58,6 +66,8 @@ public:
     // Latest on-screen message and when it arrived (seconds, client time).
     const std::string& centerMessage() const { return centerMessage_; }
     double centerMessageTime() const { return centerMessageTime_; }
+    // Sounds received since the last call.
+    std::vector<SoundEvent> takeSounds() { return std::move(sounds_); }
     void setViewAngles(const QAngle& a) { viewAngles_ = a; }
     const QAngle& viewAngles() const { return viewAngles_; }
     const std::string& mapName() const { return mapName_; }
@@ -83,6 +93,7 @@ private:
     };
     std::map<uint16_t, EntityHistory> entities_;
     std::string centerMessage_;
+    std::vector<SoundEvent> sounds_;
     double centerMessageTime_ = -1e9;
 };
 

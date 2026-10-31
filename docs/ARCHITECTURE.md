@@ -37,7 +37,9 @@ Libraries in the build:
 |---|---|---|
 | `k_core` | `core/`, `shared/` movement, header-only `net/` | glm |
 | `k_assets` | KeyValues, mesh building, glTF parsing (no GPU) | k_core, cgltf |
-| `k_engine` | platform, render, client, server, ui, host | k_assets, SDL3, glad, imgui, stb |
+| `k_game` | entities, I/O, physics, game rules | k_assets, Jolt |
+| `k_audio` | sound scripts, playback | k_assets, miniaudio |
+| `k_engine` | platform, render, client, server, ui, host | k_game, k_audio, SDL3, glad, imgui, stb |
 | `k` | launcher executable | k_engine |
 | `k_tests` | unit tests | k_assets (no window or GPU needed) |
 
@@ -76,6 +78,18 @@ the client connection and snapshots, and calls the game through `IGameServer`.
 - Networked entities go in every snapshot as `EntityState` (model index, origin, angles,
   effects). The client interpolates them, and the renderer draws brush models with an
   offset and props with a transform.
+
+## Physics and audio
+
+- `game/physics` wraps Jolt and converts 1 unit = 0.0254 m at the boundary. The world is a
+  static compound of convex brush hulls. Solid brush entities get kinematic bodies that follow
+  their entity each tick. `prop_physics` are dynamic convex hulls of their model. Each server
+  tick runs movers, then the physics step, then copies prop transforms back to the entities.
+- Player-vs-prop collision treats props as boxes (their world bounds) in the same `TraceWorld`
+  the movement code uses. Props the player walks into get nudged along.
+- The game asks for sounds by script name through `EngineServices::emitSound`. The server
+  sends `Svc::Sound`, and the client's `AudioSystem` (miniaudio) plays it in 3D, moving
+  entity-attached sounds with the entity.
 
 ## Rendering
 

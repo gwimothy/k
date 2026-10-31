@@ -1,5 +1,6 @@
 #include "host/host.h"
 
+#include "audio/audio.h"
 #include "client/bindings.h"
 #include "core/cmdbuffer.h"
 #include "core/cvar.h"
@@ -127,6 +128,16 @@ ConCommand cmd_ent_fire(
         if (host()) host()->forwardToServer("ent_fire " + a.argString());
     },
     "Send an input to entities: ent_fire <target> <input> [param].", FCVAR_CHEAT);
+ConCommand cmd_play(
+    "play",
+    [](const CmdArgs& a) {
+        if (a.argc() < 2) {
+            log::info("Usage: play <sound script name>");
+            return;
+        }
+        if (host()) host()->playSound(a.arg(1));
+    },
+    "Play a sound script at your position.");
 ConCommand cmd_noclip(
     "noclip",
     [](const CmdArgs&) {
@@ -199,6 +210,7 @@ LaunchOptions parseCommandLine(const std::vector<std::string>& args) {
         else if (a == "-w" || a == "-width") o.width = std::max(320, std::atoi(next("1280").c_str()));
         else if (a == "-h" || a == "-height") o.height = std::max(240, std::atoi(next("720").c_str()));
         else if (a == "-game") o.gameDir = next(o.gameDir);
+        else if (a == "-nosound") o.noSound = true;
         else if (!a.empty() && a[0] == '+') {
             // "+cmd arg arg" up to the next +/- token.
             std::string statement = a.substr(1);
@@ -302,10 +314,13 @@ bool Host::initClient(const LaunchOptions& opts) {
     imguiReady_ = true;
 
     console_ = std::make_unique<ConsoleUI>();
+    audio_ = std::make_unique<AudioSystem>();
+    audio_->init(!opts.noSound);
     return true;
 }
 
 void Host::shutdownClient() {
+    audio_.reset();
     console_.reset();
     if (imguiReady_) {
         ImGui_ImplOpenGL3_Shutdown();
@@ -435,9 +450,18 @@ void Host::updateMouseCapture() {
 void Host::renderFrame(float alpha) {
     renderer_->beginFrame();
     if (client_.active()) {
-        static std::vector<RenderEntity> entities;
-        client_.renderEntities(alpha, entities);
-        renderer_->renderView(client_.view(alpha), entities);
+        client_.renderEntities(alpha, frameEntities_);
+        ViewSetup view = client_.view(alpha);
+        renderer_->renderView(view, frameEntities_);
+        if (audio_) {
+            for (auto& ev : client_.takeSounds()) {
+                if (ev.stop) audio_->stop(ev.name, ev.entity);
+                else audio_->play(ev.name, ev.origin, ev.entity, ev.volume);
+            }
+            std::vector<std::pair<int, Vec3>> origins;
+            for (auto& e : frameEntities_) origins.emplace_back(e.index, e.origin);
+            audio_->update(view.origin, view.angles, origins);
+        }
     }
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -530,8 +554,14 @@ void Host::startMap(const std::string& name) {
     }
 }
 
+void Host::playSound(const std::string& name) {
+    if (!audio_) return;
+    audio_->play(name, client_.view(1.0f).origin, 0, 1.0f);
+}
+
 void Host::disconnect() {
     bindings::releaseAll();
+    if (audio_) audio_->stopAll();
     client_.disconnect();
     server_.stop();
     if (renderer_) renderer_->unloadMap();

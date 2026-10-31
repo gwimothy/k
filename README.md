@@ -4,10 +4,10 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phases 1-5 done** (foundation, rendering, map pipeline, movement, entities). Build
-> maps in TrenchBroom, compile them with `kbsp` (BSP, vis, baked lighting), wire up doors,
-> buttons, elevators and triggers with Source-style entity I/O, and run around them with
-> Source-style movement.
+> Status: **Phases 1-6 done** (foundation, rendering, map pipeline, movement, entities,
+> physics and audio). Build maps in TrenchBroom, compile them with `kbsp` (BSP, vis, baked
+> lighting), wire up doors, buttons, elevators and triggers with Source-style entity I/O, push
+> and throw physics props, and hear it all in 3D.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
@@ -15,7 +15,8 @@ entity input/output wiring, and a console + cvar system driving everything.
 ## Building
 
 Needs CMake 3.24+, a C++20 compiler (GCC 13+, Clang 16+, MSVC 2022) and OpenGL 4.5.
-Dependencies (SDL3, glm, Dear ImGui, stb_image, cgltf, doctest) are downloaded automatically.
+Dependencies (SDL3, glm, Dear ImGui, stb_image, cgltf, Jolt Physics, miniaudio, doctest) are
+downloaded automatically.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -37,7 +38,8 @@ macOS is not supported yet (Apple stops at OpenGL 4.1; a Metal/Vulkan backend is
 | Action | Default key |
 |---|---|
 | Move | W A S D |
-| Use (buttons, doors) | E |
+| Use (buttons, doors, pick up props) | E |
+| Throw a held prop | Mouse 1 |
 | Jump / crouch | Space / Ctrl (fly up/down in noclip) |
 | Walk slowly | Alt |
 | Turn / look (keyboard) | Arrow keys |
@@ -50,6 +52,7 @@ Command-line options work like Source:
 ```sh
 ./build/bin/k -w 1920 -h 1080 -fullscreen +sv_cheats 1 +map devroom
 ./build/bin/k -dedicated +map devroom          # headless server, reads commands from stdin
+./build/bin/k -nosound                         # don't open an audio device
 ```
 
 ## Making maps
@@ -92,8 +95,9 @@ engine/
   platform/  SDL3 window and key names
   render/    OpenGL 4.5 renderer: textures, materials, glTF models, sky, debug draw
   ui/        developer console (Dear ImGui)
+  audio/     sound scripts and 3D playback (miniaudio)
   host/      main loop, startup, config
-game/        game code: entities, entity I/O, rules (k_game, behind IGameServer)
+game/        game code: entities, entity I/O, physics (Jolt), rules (k_game, behind IGameServer)
 launcher/    executable entry point
 base/        game content: cfg/, shaders/, materials/, models/ (copied next to the binary)
 tools/       kbsp map compiler, TrenchBroom config, asset/map generators

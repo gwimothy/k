@@ -59,6 +59,43 @@ public:
 };
 LINK_ENTITY_TO_CLASS(func_illusionary, FuncIllusionary)
 
+// A sound at a point (Source's ambient_generic). "message" is the sound script name,
+// "health" the volume (0-10). Loops if the script loops. Inputs PlaySound/StopSound/ToggleSound.
+class AmbientGeneric : public BaseEntity {
+public:
+    bool keyValue(const std::string& k, const std::string& v) override {
+        if (nameEquals(k, "message")) { sound_ = v; return true; }
+        if (nameEquals(k, "health")) { volume_ = std::strtof(v.c_str(), nullptr) / 10.0f; return true; }
+        if (nameEquals(k, "spawnflags")) { startSilent_ = (std::strtol(v.c_str(), nullptr, 10) & 16) != 0; return true; }
+        return BaseEntity::keyValue(k, v);
+    }
+    void activate() override {
+        // Give the client a moment to connect before starting a loop.
+        if (!startSilent_) setNextThink(world().time() + 0.25);
+    }
+    void think() override { play(); }
+    bool acceptInput(const std::string& in, BaseEntity* activator, BaseEntity* caller, const std::string& p) override {
+        if (nameEquals(in, "PlaySound")) { play(); return true; }
+        if (nameEquals(in, "StopSound")) { stop(); return true; }
+        if (nameEquals(in, "ToggleSound")) { playing_ ? stop() : play(); return true; }
+        return BaseEntity::acceptInput(in, activator, caller, p);
+    }
+
+private:
+    void play() {
+        world().emitSound(sound_, this, origin, volume_);
+        playing_ = true;
+    }
+    void stop() {
+        world().stopSound(sound_, this);
+        playing_ = false;
+    }
+    std::string sound_;
+    float volume_ = 1.0f;
+    bool startSilent_ = false, playing_ = false;
+};
+LINK_ENTITY_TO_CLASS(ambient_generic, AmbientGeneric)
+
 // A model the server can show, hide and kill. No collision yet (Phase 6 adds physics).
 class PropDynamic : public BaseEntity {
 public:

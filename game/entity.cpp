@@ -93,12 +93,22 @@ bool BaseEntity::acceptInput(const std::string& input, BaseEntity* /*activator*/
 }
 
 Vec3 BaseEntity::absMins() const {
+    if (physicsDriven && world_ && world_->physics()) {
+        Vec3 mn(0), mx(0);
+        world_->physics()->bounds(physicsBody, mn, mx);
+        return mn;
+    }
     if (brushModel > 0 && world_ && world_->map() && static_cast<size_t>(brushModel) < world_->map()->models.size())
         return world_->map()->models[static_cast<size_t>(brushModel)].mins + origin;
     return origin;
 }
 
 Vec3 BaseEntity::absMaxs() const {
+    if (physicsDriven && world_ && world_->physics()) {
+        Vec3 mn(0), mx(0);
+        world_->physics()->bounds(physicsBody, mn, mx);
+        return mx;
+    }
     if (brushModel > 0 && world_ && world_->map() && static_cast<size_t>(brushModel) < world_->map()->models.size())
         return world_->map()->models[static_cast<size_t>(brushModel)].maxs + origin;
     return origin;
