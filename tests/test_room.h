@@ -2,6 +2,9 @@
 // A small compiled test map shared by the BSP and movement tests:
 // a sealed 512 x 512 x 256 room with a pillar at the center, a 16-unit step at
 // x 160..224 / y -200..-136 and a 64-unit block at x -200..-136 / y -200..-136.
+// Brush entities: door1 (x 64..80, y 100..200, opens up), button1 (on the east wall at
+// y 40..72, z 48..80), a trigger_multiple (x -200..-150, y 100..150) and "lift", an 8-unit
+// platform at x -232..-136, y -80..16 that rises 64 units. A point_message named "msg".
 
 #include "compiler.h"
 #include "shared/bspfile.h"
@@ -49,6 +52,22 @@ inline const bsp::BspData& testRoom() {
         map += box(160, -200, 0, 224, -136, 16, "dev/dev_blue");  // a 16-unit step
         map += box(-200, -200, 0, -136, -136, 64, "dev/dev_blue"); // a 64-unit block
         map += "}\n{\n\"classname\" \"info_player_start\"\n\"origin\" \"128 0 0\"\n}\n";
+        // Brush entities for the game tests:
+        // a door slab that opens upward, a button, a trigger volume, and an elevator platform.
+        map += "{\n\"classname\" \"func_door\"\n\"targetname\" \"door1\"\n\"movedir\" \"-90 0 0\"\n"
+               "\"speed\" \"400\"\n\"wait\" \"-1\"\n\"lip\" \"8\"\n"
+               "\"OnFullyOpen\" \"msg,ShowMessage,door open,0,-1\"\n";
+        map += box(64, 100, 0, 80, 200, 128, "dev/dev_orange");
+        map += "}\n{\n\"classname\" \"func_button\"\n\"targetname\" \"button1\"\n\"movedir\" \"0 0 0\"\n"
+               "\"OnPressed\" \"msg,ShowMessage,pressed,0,-1\"\n";
+        map += box(240, 40, 48, 256, 72, 80, "dev/dev_blue");
+        map += "}\n{\n\"classname\" \"trigger_multiple\"\n\"wait\" \"1\"\n"
+               "\"OnTrigger\" \"msg,ShowMessage,triggered,0,-1\"\n\"OnEndTouch\" \"msg,ShowMessage,left,0,-1\"\n";
+        map += box(-200, 100, 0, -150, 150, 64, "tools/toolstrigger");
+        map += "}\n{\n\"classname\" \"func_door\"\n\"targetname\" \"lift\"\n\"movedir\" \"-90 0 0\"\n"
+               "\"speed\" \"100\"\n\"wait\" \"-1\"\n\"lip\" \"-56\"\n";
+        map += box(-232, -80, 0, -136, 16, 8, "dev/dev_green");
+        map += "}\n{\n\"classname\" \"point_message\"\n\"targetname\" \"msg\"\n\"origin\" \"0 0 64\"\n}\n";
         map += "{\n\"classname\" \"light_environment\"\n\"pitch\" \"-60\"\n\"angles\" \"0 0 0\"\n}\n";
         map += "{\n\"classname\" \"light\"\n\"origin\" \"-128 -128 128\"\n}\n";
         std::ofstream(dir / "room.map") << map;

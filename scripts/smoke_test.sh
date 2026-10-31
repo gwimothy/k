@@ -44,11 +44,13 @@ rm -rf "$SHOTS"
 export SDL_VIDEO_FORCE_EGL=1
 # Note: screenshot captures at the end of the frame, so each one is followed by +wait.
 out=$("${RUNNER[@]}" "$EXE" -w 1280 -h 720 \
-  +mat_vsync 0 +cl_showfps 1 +cl_showpos 1 +sv_cheats 1 \
+  +mat_vsync 0 +cl_showfps 1 +cl_showpos 1 +sv_cheats 1 +developer_io 1 \
   +wait 30 +screenshot +wait \
   ++forward +wait 60 +-forward +wait 10 +getpos \
   +setpos 380 -420 0 +setang 6 150 +r_showbounds 1 +wait 10 +screenshot +wait \
   +setpos 1700 -200 0 +setang 15 30 +r_showbounds 0 +wait 10 +screenshot +wait \
+  +setpos 960 112 0 +setang 0 0 +wait 5 ++use +wait 3 +-use +wait 30 \
+  +setpos 784 -816 9 +wait 120 +getpos \
   +toggleconsole +cvarlist sv_ +wait 5 +screenshot +wait \
   +quit 2>&1)
 echo "$out" | grep -v "GL:"
@@ -59,4 +61,8 @@ grep -q "World: " <<<"$out" || { echo "FAIL: compiled map didn't load"; exit 1; 
 # +forward for 60 frames must have moved the player off the origin.
 grep -qE "setpos [1-9][0-9]*\.[0-9]+ " <<<"$out" || { echo "FAIL: scripted movement didn't move the player"; exit 1; }
 if grep -q "failed to compile\|failed to link" <<<"$out"; then echo "FAIL: shader errors"; exit 1; fi
+# Entities: the welcome message, the button opening the door, the elevator lifting the player.
+grep -q "Welcome to the dev room" <<<"$out" || { echo "FAIL: logic_auto/point_message didn't fire"; exit 1; }
+grep -q "corridor_door' : Open" <<<"$out" || { echo "FAIL: the button didn't open the door"; exit 1; }
+grep -qE "setpos 784.00 -816.00 20[0-9]\." <<<"$out" || { echo "FAIL: the elevator didn't carry the player up"; exit 1; }
 echo "== All smoke tests passed ($count screenshots in $SHOTS)"

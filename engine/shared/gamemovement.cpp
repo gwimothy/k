@@ -17,7 +17,7 @@ struct Mover {
     const UserCmd& cmd;
     float dt;
     const MoveParams& p;
-    const bsp::BspData* map;
+    const TraceWorld* world;
 
     bool onGround() const { return (s.flags & FL_ONGROUND) != 0; }
     bool ducking() const { return (s.flags & FL_DUCKING) != 0; }
@@ -26,12 +26,7 @@ struct Mover {
 
     bsp::TraceResult trace(const Vec3& from, const Vec3& to) const { return trace(from, to, mins(), maxs()); }
     bsp::TraceResult trace(const Vec3& from, const Vec3& to, const Vec3& mn, const Vec3& mx) const {
-        if (!map) {
-            bsp::TraceResult r;
-            r.endPos = to;
-            return r;
-        }
-        return bsp::traceBox(*map, from, to, mn, mx, kPlayerMask);
+        return world->traceBox(from, to, mn, mx, kPlayerMask);
     }
 
     static void clipVelocity(const Vec3& in, const Vec3& normal, Vec3& out, float overbounce) {
@@ -50,10 +45,12 @@ struct Mover {
         auto tr = trace(s.origin, s.origin - Vec3(0, 0, 2));
         if (tr.fraction < 1.0f && tr.normal.z >= kGroundNormalZ && !tr.allSolid) {
             s.flags |= FL_ONGROUND;
+            s.groundEntity = tr.entity;
             if (!tr.startSolid) s.origin = tr.endPos;
             if (s.velocity.z < 0) s.velocity.z = 0;
         } else {
             s.flags &= ~FL_ONGROUND;
+            s.groundEntity = -1;
         }
     }
 
@@ -283,6 +280,7 @@ struct Mover {
 void playerMoveNoclip(proto::PlayerState& s, const UserCmd& cmd, float dt, const MoveParams& p) {
     s.viewAngles = cmd.viewAngles;
     s.flags &= ~FL_ONGROUND;
+    s.groundEntity = -1;
 
     float speed = glm::length(s.velocity);
     if (speed < 0.1f) {
@@ -311,12 +309,21 @@ void playerMoveNoclip(proto::PlayerState& s, const UserCmd& cmd, float dt, const
     s.oldButtons = cmd.buttons;
 }
 
-void playerMove(proto::PlayerState& s, const UserCmd& cmd, float dt, const MoveParams& p, const bsp::BspData* map) {
-    if (s.moveType == MOVETYPE_NOCLIP || !map) {
+void playerMove(proto::PlayerState& s, const UserCmd& cmd, float dt, const MoveParams& p, const TraceWorld* world) {
+    if (s.moveType == MOVETYPE_NOCLIP || !world) {
         playerMoveNoclip(s, cmd, dt, p);
         return;
     }
-    Mover{s, cmd, dt, p, map}.run();
+    Mover{s, cmd, dt, p, world}.run();
+}
+
+void playerMove(proto::PlayerState& s, const UserCmd& cmd, float dt, const MoveParams& p, const bsp::BspData* map) {
+    if (!map) {
+        playerMove(s, cmd, dt, p, static_cast<const TraceWorld*>(nullptr));
+        return;
+    }
+    BspTraceWorld world(map);
+    playerMove(s, cmd, dt, p, &world);
 }
 
 } // namespace k

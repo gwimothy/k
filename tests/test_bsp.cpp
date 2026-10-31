@@ -41,8 +41,10 @@ TEST_CASE("kbsp: compiled room has the right contents") {
 
 TEST_CASE("kbsp: faces are only generated on the inside") {
     const auto& b = testRoom();
-    // Floor, 4 walls (sky is nodraw), and the pillar's 4 sides: no outward faces, no pillar caps.
-    for (auto& f : b.faces) {
+    // World faces (model 0) only: brush entities keep all their faces.
+    REQUIRE(!b.models.empty());
+    for (uint32_t fi = 0; fi < b.models[0].numFaces; ++fi) {
+        const auto& f = b.faces[b.models[0].firstFace + fi];
         Vec3 c(0);
         uint32_t n = 0;
         for (uint32_t i = 0; i < f.numIndices; ++i, ++n) c += b.vertices[b.indices[f.firstIndex + i]].position;

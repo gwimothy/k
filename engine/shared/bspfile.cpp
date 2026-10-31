@@ -271,7 +271,15 @@ std::optional<BspData> read(const std::vector<uint8_t>& bytes, std::string* erro
     for (auto f : b.leafFaces)
         if (f >= b.faces.size()) return fail("bad leaf face");
     for (auto& m : b.models)
-        if (static_cast<size_t>(m.firstFace) + m.numFaces > b.faces.size()) return fail("bad model");
+        if (static_cast<size_t>(m.firstFace) + m.numFaces > b.faces.size() ||
+            static_cast<size_t>(m.firstBrush) + m.numBrushes > b.brushes.size())
+            return fail("bad model");
+    for (auto& br : b.brushes)
+        if (static_cast<size_t>(br.firstSide) + br.numSides > b.brushSides.size()) return fail("bad brush");
+    for (auto& bs : b.brushSides)
+        if (bs.plane < 0 || static_cast<size_t>(bs.plane) >= b.planes.size()) return fail("bad brush side");
+    for (auto lb : b.leafBrushes)
+        if (lb >= b.brushes.size()) return fail("bad leaf brush");
     return b;
 }
 

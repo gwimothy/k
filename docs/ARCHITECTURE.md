@@ -59,6 +59,24 @@ a text entity lump. The server uses it for entities (and collision in Phase 4). 
 finds the camera's leaf, decompresses its PVS, frustum-culls leaf bounds, and batches visible
 faces by material into `glMultiDrawElements` calls.
 
+## Entities
+
+The game library (`game/`) owns every entity; the engine's `Server` only handles timing,
+the client connection and snapshots, and calls the game through `IGameServer`.
+
+- Entities subclass `BaseEntity` and register with `LINK_ENTITY_TO_CLASS(classname, Class)`.
+  Map key/values go to `keyValue()`, then `spawn()`, then `activate()` once all exist.
+- Outputs are `Output` members declared by name. Map keys such as
+  `"OnPressed" "door1,Open,,0,-1"` (or `"OnPressed#2"` for more) add connections. Firing an
+  output queues events; the queue delivers each to `acceptInput()` on the targets when its
+  delay is up.
+- Movement collides with the world and with solid brush entities (`GameWorld` implements
+  `TraceWorld`). Movers move through `tryPush`, which carries or pushes the player and
+  reports `blocked()` if it can't.
+- Networked entities go in every snapshot as `EntityState` (model index, origin, angles,
+  effects). The client interpolates them, and the renderer draws brush models with an
+  offset and props with a transform.
+
 ## Rendering
 
 ```

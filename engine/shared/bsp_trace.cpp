@@ -239,6 +239,32 @@ TraceResult traceBox(const BspData& bsp, const Vec3& start, const Vec3& end, con
 
     if (w.result.allSolid) w.result.fraction = 0.0f;
     w.result.endPos = start + (end - start) * w.result.fraction;
+    if (w.result.fraction < 1.0f || w.result.startSolid) w.result.entity = 0;
+    return w.result;
+}
+
+TraceResult traceBoxModel(const BspData& bsp, int model, const Vec3& offset, const Vec3& start, const Vec3& end,
+                          const Vec3& mins, const Vec3& maxs, uint32_t mask) {
+    TraceResult none;
+    none.endPos = end;
+    if (model <= 0 || static_cast<size_t>(model) >= bsp.models.size()) return none;
+    const Model& m = bsp.models[static_cast<size_t>(model)];
+    Vec3 center = (mins + maxs) * 0.5f;
+    BoxWork w;
+    w.bsp = &bsp;
+    w.mask = mask;
+    w.start = start + center - offset;
+    w.end = end + center - offset;
+    w.extents = (maxs - mins) * 0.5f;
+    w.result = {};
+    for (uint32_t i = 0; i < m.numBrushes; ++i) {
+        const Brush& b = bsp.brushes[m.firstBrush + i];
+        if (!(b.contents & mask)) continue;
+        clipBoxToBrush(w, b);
+        if (w.result.allSolid) break;
+    }
+    if (w.result.allSolid) w.result.fraction = 0.0f;
+    w.result.endPos = start + (end - start) * w.result.fraction;
     return w.result;
 }
 

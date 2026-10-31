@@ -187,6 +187,8 @@ void Compiler::emitBsp() {
     world.mins = k::Vec3(worldMins);
     world.maxs = k::Vec3(worldMaxs);
     world.firstFace = 0;
+    world.firstBrush = 0;
+    world.numBrushes = 0;
     world.numFaces = static_cast<uint32_t>(bsp.faces.size());
     world.headNode = 0;
     bsp.models.push_back(world);
@@ -211,6 +213,14 @@ void Compiler::emitBsp() {
                 }
             }
             m.numFaces = static_cast<uint32_t>(bsp.faces.size()) - m.firstFace;
+            // Brushes are stored in entity order, so this entity's are contiguous.
+            m.firstBrush = 0;
+            m.numBrushes = 0;
+            for (size_t bi = 0; bi < brushes.size(); ++bi) {
+                if (brushes[bi].entity != static_cast<int>(e)) continue;
+                if (m.numBrushes == 0) m.firstBrush = static_cast<uint32_t>(bi);
+                ++m.numBrushes;
+            }
             m.mins = k::Vec3(lo);
             m.maxs = k::Vec3(hi);
             m.headNode = -1;

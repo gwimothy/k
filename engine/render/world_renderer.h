@@ -42,6 +42,14 @@ public:
     };
     void draw(const DrawParams& p, ShaderLibrary& shaders, MaterialSystem& materials);
 
+    // Brush entities (doors, platforms): model number and how far they've moved.
+    struct BrushInstance {
+        int model;
+        Vec3 origin;
+    };
+    void drawBrushModels(const DrawParams& p, const std::vector<BrushInstance>& instances, ShaderLibrary& shaders,
+                         MaterialSystem& materials);
+
     const WorldStats& stats() const { return stats_; }
     const bsp::BspData* bsp() const { return bsp_.get(); }
 
@@ -63,6 +71,8 @@ private:
         std::vector<const void*> offsets;
     };
     std::vector<Batch> batches_;
+    void drawBatches(const DrawParams& p, const Mat4& model, const std::vector<Batch>& batches, ShaderLibrary& shaders,
+                     MaterialSystem& materials);
     WorldStats stats_;
 };
 

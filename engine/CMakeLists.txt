@@ -46,5 +46,5 @@ add_library(k_engine STATIC
   host/host.cpp
 )
 target_include_directories(k_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(k_engine PUBLIC k_assets SDL3::SDL3-static glad imgui PRIVATE stb_headers)
+target_link_libraries(k_engine PUBLIC k_assets k_game SDL3::SDL3-static glad imgui PRIVATE stb_headers)
 k_set_warnings(k_engine)

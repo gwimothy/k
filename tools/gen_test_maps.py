@@ -179,6 +179,28 @@ def devroom():
     # A detail brush: doesn't cut the BSP or block vis.
     m.entity({"classname": "func_detail"}, [box((-96, -640, 0), (96, -600, 96), "dev/dev_blue")])
 
+    # ---- Entities (Phase 5) ----
+    # A door in the doorway to the corridor: +use opens it, or the button beside it.
+    m.entity({"classname": "func_door", "targetname": "corridor_door", "movedir": "-90 0 0", "speed": "160",
+              "wait": "3", "lip": "4", "spawnflags": "256"},
+             [box((W + 2, -64, 0), (W + 14, 64, 128), "dev/dev_orange")])
+    m.entity({"classname": "func_button", "targetname": "door_button", "movedir": "0 0 0",
+              "OnPressed": "corridor_door,Open,,0,-1"},
+             [box((W - 6, 96, 48), (W, 128, 80), "dev/dev_green")])
+    # The dark room greets you once.
+    m.entity({"classname": "trigger_once", "OnTrigger": "hud,ShowHudMessage,The dark room,0,-1"},
+             [box((rx0 + 16, -64, 0), (rx0 + 80, 64, 128), "tools/toolstrigger")])
+    # An elevator up to a ledge on the south wall: step on it and it rises.
+    ex0, ex1, ey0, ey1 = 720, 848, -880, -752
+    m.add(box((ex0, -W, 184), (W, ey0, 200), "dev/dev_blue"))  # ledge
+    m.entity({"classname": "func_door", "targetname": "lift", "movedir": "-90 0 0", "speed": "120",
+              "wait": "3", "lip": "-192"},
+             [box((ex0, ey0, 0), (ex1, ey1, 8), "dev/dev_green")])
+    m.entity({"classname": "trigger_multiple", "wait": "1", "OnStartTouch": "lift,Open,,0.5,-1"},
+             [box((ex0 + 8, ey0 + 8, 8), (ex1 - 8, ey1 - 8, 72), "tools/toolstrigger")])
+    m.entity({"classname": "point_message", "targetname": "hud", "origin": "0 0 64"})
+    m.entity({"classname": "logic_auto", "OnMapSpawn": "hud,ShowHudMessage,Welcome to the dev room,1,-1"})
+
     m.entity({"classname": "info_player_start", "origin": "0 0 0", "angles": "0 0 0"})
     m.entity({"classname": "light_environment", "angles": "0 35 0", "pitch": "-50",
               "_light": "255 238 210 380", "_ambient": "150 175 215 90"})

@@ -210,6 +210,7 @@ def main():
         "toolsnodraw": (220, 200, 40),
         "toolsplayerclip": (170, 80, 200),
         "toolsclip": (200, 60, 60),
+        "toolstrigger": (230, 120, 40),
     }
     for name, color in tools.items():
         write_png(os.path.join(ROOT, "materials", "tools", name + ".png"), *dev_texture(color, size=64))

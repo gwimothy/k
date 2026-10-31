@@ -120,11 +120,6 @@ void WorldRenderer::updateVisibility(const Mat4& viewProj, const Vec3& cameraPos
             faceVisFrame_[f] = frame_;
         }
     }
-    // Brush entities are always drawn for now (they get their own transforms in Phase 5).
-    if (r_drawbrushmodels.getBool())
-        for (size_t m = 1; m < b.models.size(); ++m)
-            for (uint32_t i = 0; i < b.models[m].numFaces; ++i) faceVisFrame_[b.models[m].firstFace + i] = frame_;
-
     // Batch visible faces by material.
     batches_.clear();
     std::vector<int> batchOf(faceMaterials_.size(), -1);
@@ -150,16 +145,50 @@ void WorldRenderer::updateVisibility(const Mat4& viewProj, const Vec3& cameraPos
 void WorldRenderer::draw(const DrawParams& p, ShaderLibrary& shaders, MaterialSystem& materials) {
     if (!bsp_) return;
     if (!p.translucentPass) updateVisibility(p.viewProj, p.cameraPos);
+    drawBatches(p, Mat4(1.0f), batches_, shaders, materials);
+}
+
+void WorldRenderer::drawBrushModels(const DrawParams& p, const std::vector<BrushInstance>& instances,
+                                    ShaderLibrary& shaders, MaterialSystem& materials) {
+    if (!bsp_ || !r_drawbrushmodels.getBool()) return;
+    const auto& b = *bsp_;
+    Frustum frustum(p.viewProj);
+    std::vector<Batch> batches;
+    for (auto& inst : instances) {
+        if (inst.model <= 0 || static_cast<size_t>(inst.model) >= b.models.size()) continue;
+        const auto& m = b.models[static_cast<size_t>(inst.model)];
+        if (!frustum.visible(m.mins + inst.origin, m.maxs + inst.origin)) continue;
+        batches.clear();
+        for (uint32_t i = 0; i < m.numFaces; ++i) {
+            uint32_t f = m.firstFace + i;
+            Material* mat = faceMaterials_[f];
+            auto it = std::find_if(batches.begin(), batches.end(), [&](const Batch& bt) { return bt.material == mat; });
+            if (it == batches.end()) {
+                batches.push_back({mat, {}, {}});
+                it = batches.end() - 1;
+            }
+            it->counts.push_back(static_cast<int32_t>(b.faces[f].numIndices));
+            it->offsets.push_back(reinterpret_cast<const void*>(static_cast<uintptr_t>(b.faces[f].firstIndex) * sizeof(uint32_t)));
+            if (!p.translucentPass) stats_.triangles += b.faces[f].numIndices / 3;
+        }
+        Mat4 model(1.0f);
+        model[3] = Vec4(inst.origin, 1.0f);
+        drawBatches(p, model, batches, shaders, materials);
+    }
+}
+
+void WorldRenderer::drawBatches(const DrawParams& p, const Mat4& model, const std::vector<Batch>& batches,
+                                ShaderLibrary& shaders, MaterialSystem& materials) {
     glBindVertexArray(vao_);
     glBindTextureUnit(1, (lightmap_ && !p.fullbright) ? lightmap_ : whiteLightmap_);
-    for (auto& batch : batches_) {
+    for (auto& batch : batches) {
         const Material& mat = *batch.material;
         if (mat.translucent != p.translucentPass) continue;
         Shader* shader = shaders.get(mat.shader == MaterialShader::UnlitGeneric ? "unlit_generic" : "lightmapped_generic");
         if (!shader) continue;
         shader->bind();
         shader->set("u_viewProj", p.viewProj);
-        shader->set("u_model", Mat4(1.0f));
+        shader->set("u_model", model);
         shader->set("u_cameraPos", p.cameraPos);
         shader->set("u_fogColor", p.fogColor);
         shader->set("u_fogDensity", p.fogDensity);

@@ -16,7 +16,7 @@
 namespace k::bsp {
 
 constexpr uint32_t kMagic = 0x5053424B; // "KBSP"
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;
 
 enum Contents : uint32_t {
     CONTENTS_EMPTY = 0,
@@ -82,7 +82,8 @@ struct BrushSide {
 struct Model {
     Vec3 mins, maxs;
     uint32_t firstFace, numFaces;
-    int32_t headNode; // world only for now; -1 for brush entities
+    uint32_t firstBrush, numBrushes; // collision brushes (brush entities; the world uses leaf brushes)
+    int32_t headNode; // world only; -1 for brush entities
 };
 
 using Entity = std::map<std::string, std::string>;

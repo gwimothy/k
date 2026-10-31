@@ -46,7 +46,7 @@ public:
     void unloadMap();
 
     void beginFrame();
-    void renderView(const ViewSetup& view);
+    void renderView(const ViewSetup& view, const std::vector<RenderEntity>& entities);
     // Call after the UI has been drawn; handles pending screenshots.
     void endFrame();
 

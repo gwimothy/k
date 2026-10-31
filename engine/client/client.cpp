@@ -3,6 +3,7 @@
 #include "client/kbutton.h"
 #include "core/cvar.h"
 #include "core/log.h"
+#include "core/time.h"
 
 #include <algorithm>
 
@@ -80,6 +81,9 @@ void Client::disconnect() {
     snapshots_ = 0;
     commandNumber_ = 0;
     previous_ = current_ = {};
+    entities_.clear();
+    modelTable_.clear();
+    centerMessage_.clear();
 }
 
 void Client::frameKeyboardLook(float dt) {
@@ -152,6 +156,9 @@ void Client::readPackets() {
                     auto version = r.read<uint32_t>();
                     serverTickInterval_ = r.read<float>();
                     mapName_ = r.readString();
+                    modelTable_.clear();
+                    for (uint16_t n = r.read<uint16_t>(), i = 0; i < n && !r.overflowed(); ++i)
+                        modelTable_.push_back(r.readString());
                     if (version != proto::kProtocolVersion) {
                         log::error("Server protocol {} doesn't match ours ({})", version, proto::kProtocolVersion);
                         disconnect();
@@ -168,15 +175,49 @@ void Client::readPackets() {
                     previous_ = snapshots_ == 0 ? state : current_;
                     current_ = state;
                     ++snapshots_;
+                    uint16_t count = r.read<uint16_t>();
+                    for (uint16_t i = 0; i < count && !r.overflowed(); ++i) {
+                        auto es = proto::EntityState::read(r);
+                        auto it = entities_.find(es.index);
+                        if (it == entities_.end()) {
+                            entities_[es.index] = {es, es, snapshots_};
+                        } else {
+                            it->second.previous = it->second.current;
+                            it->second.current = es;
+                            it->second.lastSeen = snapshots_;
+                        }
+                    }
+                    // Entities missing from this snapshot were removed on the server.
+                    std::erase_if(entities_, [&](const auto& kv) { return kv.second.lastSeen != snapshots_; });
                     break;
                 }
                 case proto::Svc::Print: log::info("{}", r.readString()); break;
                 case proto::Svc::SetAngle: viewAngles_ = r.read<QAngle>(); break;
+                case proto::Svc::CenterPrint:
+                    centerMessage_ = r.readString();
+                    centerMessageTime_ = platformTime();
+                    log::info("{}", centerMessage_);
+                    break;
                 default:
                     log::warn("Client: bad server message {}", static_cast<int>(type));
                     return;
             }
         }
+    }
+}
+
+void Client::renderEntities(float alpha, std::vector<RenderEntity>& out) const {
+    out.clear();
+    float t = cl_interpolate.getBool() ? std::clamp(alpha, 0.0f, 1.0f) : 1.0f;
+    for (auto& [index, h] : entities_) {
+        const auto& cur = h.current;
+        if ((cur.effects & 1u) || cur.model == 0 || cur.model >= modelTable_.size()) continue;
+        RenderEntity e;
+        e.index = index;
+        e.model = modelTable_[cur.model];
+        e.origin = glm::mix(h.previous.origin, cur.origin, t);
+        e.angles = lerpAngles(h.previous.angles, cur.angles, t);
+        out.push_back(std::move(e));
     }
 }
 

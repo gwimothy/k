@@ -7,10 +7,20 @@
 #include "shared/usercmd.h"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace k {
+
+// An entity ready to draw: interpolated position, resolved model name.
+struct RenderEntity {
+    int index;
+    std::string model; // "*N" brush model or a model path
+    Vec3 origin;
+    QAngle angles;
+};
 
 struct ViewSetup {
     Vec3 origin{0};
@@ -43,6 +53,11 @@ public:
     ViewSetup view(float alpha) const;
 
     const proto::PlayerState& latestState() const { return current_; }
+    // Visible networked entities, interpolated like the view.
+    void renderEntities(float alpha, std::vector<RenderEntity>& out) const;
+    // Latest on-screen message and when it arrived (seconds, client time).
+    const std::string& centerMessage() const { return centerMessage_; }
+    double centerMessageTime() const { return centerMessageTime_; }
     void setViewAngles(const QAngle& a) { viewAngles_ = a; }
     const QAngle& viewAngles() const { return viewAngles_; }
     const std::string& mapName() const { return mapName_; }
@@ -60,6 +75,15 @@ private:
     uint32_t snapshots_ = 0;
     uint32_t serverTick_ = 0;
     proto::PlayerState previous_, current_;
+
+    std::vector<std::string> modelTable_;
+    struct EntityHistory {
+        proto::EntityState previous, current;
+        uint32_t lastSeen = 0; // snapshot number
+    };
+    std::map<uint16_t, EntityHistory> entities_;
+    std::string centerMessage_;
+    double centerMessageTime_ = -1e9;
 };
 
 } // namespace k

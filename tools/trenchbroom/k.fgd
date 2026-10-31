@@ -33,3 +33,111 @@
     angles(string) : "Pitch Yaw Roll" : "0 0 0"
     modelscale(float) : "Scale" : "1"
 ]
+
+// ---- Brush entities ---------------------------------------------------------------------
+
+@BaseClass = Targetname [ targetname(target_source) : "Name" ]
+
+@SolidClass base(Targetname) = func_door : "Door, elevator or platform: slides along movedir by its size minus lip."
+[
+    movedir(string) : "Move direction (pitch yaw roll); -90 0 0 = up" : "0 0 0"
+    speed(integer) : "Speed (units/sec)" : 100
+    wait(float) : "Seconds before returning (-1 = stay)" : 4
+    lip(integer) : "Lip: units left showing (negative = travel further)" : 0
+    locked(choices) : "Locked" : 0 = [ 0 : "No" 1 : "Yes" ]
+    spawnflags(flags) = [ 256 : "Use opens" : 0 ]
+    OnOpen(output) : "Started opening"
+    OnClose(output) : "Started closing"
+    OnFullyOpen(output) : "Reached the open position"
+    OnFullyClosed(output) : "Reached the closed position"
+    OnLockedUse(output) : "Used while locked"
+    OnBlocked(output) : "Something is in the way"
+]
+
+@SolidClass base(Targetname) = func_button : "Pressed with +use."
+[
+    movedir(string) : "Press direction" : "0 0 0"
+    wait(float) : "Seconds before it pops back out" : 1
+    locked(choices) : "Locked" : 0 = [ 0 : "No" 1 : "Yes" ]
+    OnPressed(output) : "Pressed"
+    OnIn(output) : "Fully pressed in"
+    OnOut(output) : "Back out"
+    OnUseLocked(output) : "Used while locked"
+]
+
+@SolidClass base(Targetname) = trigger_multiple : "Fires when the player enters. Use tools/toolstrigger."
+[
+    wait(float) : "Seconds between OnTrigger fires" : 1
+    StartDisabled(choices) : "Start disabled" : 0 = [ 0 : "No" 1 : "Yes" ]
+    OnStartTouch(output) : "Player entered"
+    OnEndTouch(output) : "Player left"
+    OnTrigger(output) : "Player entered (respects wait)"
+]
+
+@SolidClass base(Targetname) = trigger_once : "Fires once, then removes itself."
+[
+    OnTrigger(output) : "Player entered"
+]
+
+@SolidClass base(Targetname) = trigger_teleport : "Teleports the player to the named destination."
+[
+    target(target_destination) : "Destination (info_teleport_destination)"
+]
+
+@SolidClass base(Targetname) = func_brush : "A brush that can be hidden and made non-solid."
+[
+    StartDisabled(choices) : "Start disabled" : 0 = [ 0 : "No" 1 : "Yes" ]
+    Solidity(choices) : "Solidity" : 0 = [ 0 : "When visible" 1 : "Never" 2 : "Always" ]
+]
+
+@SolidClass base(Targetname) = func_wall : "A solid brush entity (no BSP split)." []
+@SolidClass base(Targetname) = func_illusionary : "Visible but never solid." []
+
+// ---- Logic ---------------------------------------------------------------------------------
+
+@PointClass base(Targetname) color(0 200 255) size(-8 -8 -8, 8 8 8) = logic_relay : "Fires OnTrigger when it receives Trigger."
+[
+    StartDisabled(choices) : "Start disabled" : 0 = [ 0 : "No" 1 : "Yes" ]
+    spawnflags(flags) = [ 1 : "Only trigger once" : 0 ]
+    OnTrigger(output) : "Triggered"
+    OnSpawn(output) : "Map started"
+]
+
+@PointClass base(Targetname) color(0 200 255) size(-8 -8 -8, 8 8 8) = logic_timer : "Fires OnTimer every RefireTime seconds."
+[
+    RefireTime(float) : "Interval (seconds)" : 1
+    StartDisabled(choices) : "Start disabled" : 0 = [ 0 : "No" 1 : "Yes" ]
+    OnTimer(output) : "Timer fired"
+]
+
+@PointClass color(0 200 255) size(-8 -8 -8, 8 8 8) = logic_auto : "Fires OnMapSpawn when the map starts."
+[
+    OnMapSpawn(output) : "Map started"
+]
+
+@PointClass base(Targetname) color(0 200 255) size(-8 -8 -8, 8 8 8) = math_counter : "Integer counter with limits."
+[
+    startvalue(integer) : "Start value" : 0
+    min(integer) : "Minimum" : 0
+    max(integer) : "Maximum" : 0
+    OnHitMax(output) : "Reached max"
+    OnHitMin(output) : "Reached min"
+    OutValue(output) : "Value changed (value as parameter)"
+]
+
+@PointClass base(Targetname) color(255 255 255) size(-8 -8 -8, 8 8 8) = point_message : "Shows a message (inputs ShowMessage, ShowHudMessage)."
+[
+    message(string) : "Message"
+]
+
+@PointClass base(Targetname) color(200 200 200) size(-8 -8 -8, 8 8 8) = info_target : "A named position." []
+@PointClass base(Targetname) color(200 200 200) size(-16 -16 0, 16 16 72) = info_teleport_destination : "Teleport destination."
+[
+    angles(string) : "Facing (pitch yaw roll)" : "0 0 0"
+]
+
+@PointClass base(Targetname) color(200 150 100) model({ "path": model }) size(-16 -16 0, 16 16 32) = prop_dynamic : "A model the game can show/hide (TurnOn/TurnOff)."
+[
+    model(studio) : "Model path"
+    angles(string) : "Pitch Yaw Roll" : "0 0 0"
+]

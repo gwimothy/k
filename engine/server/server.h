@@ -1,6 +1,8 @@
 #pragma once
-// The game server. Always authoritative, even in single-player (local loopback client).
+// The engine side of the server: tick timing, the client connection, and snapshots.
+// Game logic (entities, movement, rules) lives in the game library behind IGameServer.
 
+#include "game_server.h"
 #include "net/channel.h"
 #include "shared/bspfile.h"
 #include "shared/protocol.h"
@@ -14,6 +16,9 @@ namespace k {
 
 class Server {
 public:
+    Server();
+    ~Server();
+
     bool start(std::string mapName, std::shared_ptr<const bsp::BspData> map,
                std::unique_ptr<net::NetChannel> clientChannel);
     void stop();
@@ -25,31 +30,26 @@ public:
     float tickInterval() const { return tickInterval_; }
     uint32_t tickCount() const { return tickCount_; }
     const std::string& mapName() const { return mapName_; }
-    const proto::PlayerState& player() const { return player_; }
+    const proto::PlayerState& player() const;
     const bsp::BspData* map() const { return map_.get(); }
-    void setPlayerOrigin(const Vec3& origin) {
-        player_.origin = origin;
-        player_.velocity = Vec3(0);
-    }
+    void setPlayerOrigin(const Vec3& origin);
+    game::IGameServer* game() const { return game_.get(); }
 
 private:
     void readMessages();
-    void processUserCmd(const UserCmd& cmd);
     void sendSnapshot();
-    void spawnPlayer();
-    void handleStringCmd(const std::string& text);
+    void sendReliable(const net::ByteWriter& w);
 
     bool active_ = false;
     std::string mapName_;
     std::shared_ptr<const bsp::BspData> map_;
-    QAngle spawnAngles_;
     float tickInterval_ = 1.0f / 66.0f;
     uint32_t tickCount_ = 0;
 
     std::unique_ptr<net::NetChannel> channel_;
+    std::unique_ptr<game::IGameServer> game_;
     bool clientConnected_ = false;
     uint32_t lastCommandNumber_ = 0;
-    proto::PlayerState player_;
 };
 
 } // namespace k

@@ -4,9 +4,10 @@ A 3D game engine in the spirit of Valve's **Source 1**: compiled BSP maps with p
 visibility and baked lighting, an authoritative client/server split (even in single-player),
 entity input/output wiring, and a console + cvar system driving everything.
 
-> Status: **Phases 1-4 done** (foundation, rendering, map pipeline, movement). Build maps in
-> TrenchBroom, compile them with `kbsp` (BSP, vis, baked lighting), and run around them with
-> Source-style movement: air strafing, crouching, stairs.
+> Status: **Phases 1-5 done** (foundation, rendering, map pipeline, movement, entities). Build
+> maps in TrenchBroom, compile them with `kbsp` (BSP, vis, baked lighting), wire up doors,
+> buttons, elevators and triggers with Source-style entity I/O, and run around them with
+> Source-style movement.
 > See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ![devroom](docs/images/devroom.png)
@@ -36,6 +37,7 @@ macOS is not supported yet (Apple stops at OpenGL 4.1; a Metal/Vulkan backend is
 | Action | Default key |
 |---|---|
 | Move | W A S D |
+| Use (buttons, doors) | E |
 | Jump / crouch | Space / Ctrl (fly up/down in noclip) |
 | Walk slowly | Alt |
 | Turn / look (keyboard) | Arrow keys |
@@ -62,7 +64,7 @@ Setup and tips are in [tools/trenchbroom/README.md](tools/trenchbroom/README.md)
 
 Handy console commands: `cvarlist`, `find <text>`, `help <name>`, `bind <key> <cmd>`,
 `alias`, `exec <cfg>`, `toggle <cvar>`, `screenshot`, `getpos`, `mat_reloadall`, `quit`.
-With `sv_cheats 1`: `noclip`, `setpos`, `setang`, `mat_wireframe 1`, `mat_fullbright 1`, `r_novis 1`,
+With `sv_cheats 1`: `noclip`, `ent_fire <target> <input>`, `setpos`, `setang`, `mat_wireframe 1`, `mat_fullbright 1`, `r_novis 1`,
 `r_lockpvs 1`, `r_showbounds 1`, `r_drawaxis 1`.
 
 Your settings are written to `base/cfg/config.cfg` on exit. Put your own startup commands
@@ -91,6 +93,7 @@ engine/
   render/    OpenGL 4.5 renderer: textures, materials, glTF models, sky, debug draw
   ui/        developer console (Dear ImGui)
   host/      main loop, startup, config
+game/        game code: entities, entity I/O, rules (k_game, behind IGameServer)
 launcher/    executable entry point
 base/        game content: cfg/, shaders/, materials/, models/ (copied next to the binary)
 tools/       kbsp map compiler, TrenchBroom config, asset/map generators

@@ -6,6 +6,7 @@
 // It's pure: given a PlayerState, a UserCmd and the map, it produces the next PlayerState.
 // The server runs it authoritatively; client-side prediction (Phase 7) will run the same code.
 
+#include "shared/bsp_trace.h"
 #include "shared/bspfile.h"
 #include "shared/protocol.h"
 #include "shared/usercmd.h"
@@ -47,7 +48,36 @@ constexpr float kDuckViewHeight = 28.0f;
 
 constexpr uint32_t kPlayerMask = bsp::CONTENTS_SOLID | bsp::CONTENTS_SKY | bsp::CONTENTS_PLAYERCLIP;
 
-// Advance the player by one UserCmd lasting `dt` seconds. `map` may be null (no collision).
+// What movement collides with. The game implements this to include doors and elevators.
+class TraceWorld {
+public:
+    virtual ~TraceWorld() = default;
+    virtual bsp::TraceResult traceBox(const Vec3& start, const Vec3& end, const Vec3& mins, const Vec3& maxs,
+                                      uint32_t mask) const = 0;
+};
+
+// Just the map's brushes.
+class BspTraceWorld final : public TraceWorld {
+public:
+    explicit BspTraceWorld(const bsp::BspData* map) : map_(map) {}
+    bsp::TraceResult traceBox(const Vec3& start, const Vec3& end, const Vec3& mins, const Vec3& maxs,
+                              uint32_t mask) const override {
+        if (!map_) {
+            bsp::TraceResult r;
+            r.endPos = end;
+            return r;
+        }
+        return bsp::traceBox(*map_, start, end, mins, maxs, mask);
+    }
+
+private:
+    const bsp::BspData* map_;
+};
+
+// Advance the player by one UserCmd lasting `dt` seconds. `world` may be null (no collision).
+void playerMove(proto::PlayerState& state, const UserCmd& cmd, float dt, const MoveParams& params,
+                const TraceWorld* world);
+// Convenience: collide with a map only.
 void playerMove(proto::PlayerState& state, const UserCmd& cmd, float dt, const MoveParams& params,
                 const bsp::BspData* map);
 

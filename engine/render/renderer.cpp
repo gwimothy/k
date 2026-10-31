@@ -240,7 +240,7 @@ void Renderer::drawMesh(const Mesh& mesh, const Mat4& model, bool translucentPas
     }
 }
 
-void Renderer::renderView(const ViewSetup& view) {
+void Renderer::renderView(const ViewSetup& view, const std::vector<RenderEntity>& entities) {
     if (width_ <= 0 || height_ <= 0) return;
     ensureTargets();
     sceneTarget_.bind();
@@ -269,14 +269,25 @@ void Renderer::renderView(const ViewSetup& view) {
     WorldRenderer::DrawParams wp{viewProj_, cameraPos_, kFogColor,
                                  r_fog.getBool() ? r_fogdensity.getFloat() : 0.0f, mat_fullbright.getBool(), false};
 
+    // Entities: brush models (doors, platforms) and dynamic props.
+    std::vector<WorldRenderer::BrushInstance> brushes;
+    std::vector<StaticProp> dynamicProps;
+    for (auto& e : entities) {
+        if (!e.model.empty() && e.model[0] == '*') brushes.push_back({std::atoi(e.model.c_str() + 1), e.origin});
+        else if (Model* m = models_.find(e.model)) dynamicProps.push_back({m, e.origin, e.angles, 1.0f});
+    }
+
     // Opaque
     if (world_ && r_drawworld.getBool()) {
         world_->draw(wp, shaders_, materials_);
+        world_->drawBrushModels(wp, brushes, shaders_, materials_);
         stats_.drawCalls += world_->stats().drawCalls;
         stats_.triangles += world_->stats().triangles;
     }
-    if (r_drawprops.getBool())
+    if (r_drawprops.getBool()) {
         for (auto& p : props_) drawMesh(*p.model->mesh, propMatrix(p), false);
+        for (auto& p : dynamicProps) drawMesh(*p.model->mesh, propMatrix(p), false);
+    }
 
     // Sky fills whatever is left (drawn at the far plane).
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -289,6 +300,7 @@ void Renderer::renderView(const ViewSetup& view) {
     if (world_ && r_drawworld.getBool()) {
         wp.translucentPass = true;
         world_->draw(wp, shaders_, materials_);
+        world_->drawBrushModels(wp, brushes, shaders_, materials_);
     }
     if (r_drawprops.getBool())
         for (auto& p : props_) drawMesh(*p.model->mesh, propMatrix(p), true);

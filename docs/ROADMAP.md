@@ -58,14 +58,18 @@ Each phase ends in something you can run. Items are checked off as they land.
 - [x] Tests: landing, max speed, walls, sliding, jump height, steps vs blocks, crouch, air strafing, noclip, box traces
 - [ ] Ladders, water, edge bevels for non-axial brush edges
 
-## Phase 5 - Entities and game module
+## Phase 5 - Entities and game module ✅
 
-- [ ] Entity system with networked variables and a class factory (`LINK_ENTITY_TO_CLASS`)
-- [ ] Map entities spawned from the BSP entity lump
-- [ ] Entity I/O: outputs fire inputs on named targets with delays and parameters
-- [ ] Core entities: `info_player_start`, `func_door`, `func_button`, `trigger_once`, `trigger_multiple`, `logic_relay`, `logic_timer`, `light`, `prop_static`
-- [ ] Game code built as a separate shared library loaded by the engine through interfaces
-- [ ] Entity snapshots replace the single `PlayerState`
+- [x] Entity system with a class factory (`LINK_ENTITY_TO_CLASS`), key/values, think, touch, use, inputs
+- [x] Map entities spawned from the BSP entity lump; brush entities with their own collision brushes
+- [x] Entity I/O: `"OnPressed" "door1,Open,,0,-1"` connections with delays, parameters, fire limits, wildcards, `!activator`/`!caller`/`!self`/`!player`; `developer_io 1` traces it; `ent_fire` (cheat)
+- [x] Entities: `func_door` (doors, elevators), `func_button`, `trigger_once`, `trigger_multiple`, `trigger_teleport`, `logic_relay`, `logic_timer`, `logic_auto`, `math_counter`, `point_message`, `func_brush`/`func_wall`/`func_illusionary`, `prop_dynamic`, `info_target`, `info_teleport_destination`
+- [x] Movers push and carry the player; +use on buttons and doors
+- [x] Game code in its own library (`game/`, `k_game`) behind `IGameServer`
+- [x] Entity snapshots with a model table; client interpolates entities; center-screen messages
+- [x] FGD entries for all entities; devroom has a door, button, elevator, triggers and messages
+- [ ] Load the game as a shared library at runtime (needs a cross-module cvar/console interface)
+- [ ] Rotating doors, `func_tracktrain`, sounds on movers
 
 ## Phase 6 - Physics and audio
 

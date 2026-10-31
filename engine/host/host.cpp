@@ -117,6 +117,16 @@ ConCommand cmd_getpos(
         if (host()) host()->printPos();
     },
     "Print setpos/setang commands for the current position.");
+ConCommand cmd_ent_fire(
+    "ent_fire",
+    [](const CmdArgs& a) {
+        if (a.argc() < 3) {
+            log::info("Usage: ent_fire <target> <input> [param]");
+            return;
+        }
+        if (host()) host()->forwardToServer("ent_fire " + a.argString());
+    },
+    "Send an input to entities: ent_fire <target> <input> [param].", FCVAR_CHEAT);
 ConCommand cmd_noclip(
     "noclip",
     [](const CmdArgs&) {
@@ -424,7 +434,11 @@ void Host::updateMouseCapture() {
 
 void Host::renderFrame(float alpha) {
     renderer_->beginFrame();
-    if (client_.active()) renderer_->renderView(client_.view(alpha));
+    if (client_.active()) {
+        static std::vector<RenderEntity> entities;
+        client_.renderEntities(alpha, entities);
+        renderer_->renderView(client_.view(alpha), entities);
+    }
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
@@ -448,6 +462,20 @@ void Host::drawOverlay() {
         dl->AddLine(ImVec2(c.x + 3, c.y), ImVec2(c.x + 8, c.y), col, 2.0f);
         dl->AddLine(ImVec2(c.x, c.y - 8), ImVec2(c.x, c.y - 3), col, 2.0f);
         dl->AddLine(ImVec2(c.x, c.y + 3), ImVec2(c.x, c.y + 8), col, 2.0f);
+    }
+    // Center-screen messages from the game (point_message ShowHudMessage), fading out.
+    double age = platformTime() - client_.centerMessageTime();
+    if (client_.active() && !client_.centerMessage().empty() && age < 4.0) {
+        float alpha = age < 3.0 ? 1.0f : static_cast<float>(4.0 - age);
+        const char* text = client_.centerMessage().c_str();
+        ImVec2 size = ImGui::CalcTextSize(text);
+        float scale = 1.6f;
+        ImVec2 pos(io.DisplaySize.x * 0.5f - size.x * scale * 0.5f, io.DisplaySize.y * 0.32f);
+        auto* dl = ImGui::GetForegroundDrawList();
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * scale, ImVec2(pos.x + 2, pos.y + 2),
+                    IM_COL32(0, 0, 0, static_cast<int>(200 * alpha)), text);
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * scale, pos,
+                    IM_COL32(255, 235, 170, static_cast<int>(255 * alpha)), text);
     }
     if (!cl_showfps.getBool() && !cl_showpos.getBool()) return;
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 10, 10), ImGuiCond_Always, ImVec2(1, 0));
